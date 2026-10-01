@@ -114,7 +114,7 @@ const BookHotelPage = () => {
   const totalPrice = hotel?.pricePerNight * quantity;
   const totalTaxes = hotelData?.room.taxes * quantity;
   const totalDiscounts = hotelData?.room.discountedPrice * quantity;
-  const grandTotal = totalPrice + totalTaxes - totalDiscounts;
+  const grandTotal = totalPrice + totalTaxes + totalDiscounts;
   const handlebooking = async (e: React.FormEvent) => {
     e.preventDefault();
     try {

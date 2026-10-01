@@ -13,7 +13,8 @@ import { Input } from "./ui/input";
 import { signup, login } from "../api";
 import { setUser } from "@/store";
 import { useDispatch } from "react-redux";
-const SignupDialog = ({trigger}:any) => {
+
+const SignupDialog = ({ trigger, onSuccess }: any) => {
   const [isSignup, setIsSignup] = useState(true);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -22,8 +23,26 @@ const SignupDialog = ({trigger}:any) => {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [open, setopem] = useState(false);
   const dispatch = useDispatch();
+
+  const completeLogin = (data: any) => {
+    // Save in both Redux and localStorage immediately.
+    dispatch(setUser(data));
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem("user", JSON.stringify(data));
+    }
+
+    if (onSuccess) {
+      onSuccess(data);
+    }
+
+    setopem(false);
+    clearform();
+  };
+
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (isSignup) {
       try {
         const signin = await signup(
@@ -33,21 +52,35 @@ const SignupDialog = ({trigger}:any) => {
           phoneNumber,
           password
         );
-        dispatch(setUser(signin));
-      } catch (error) {
-        console.log(error);
+
+        completeLogin(signin);
+      } catch (error: any) {
+        console.error(error);
+
+        const message =
+          error?.response?.data?.message ||
+          error?.response?.data ||
+          "Signup failed. Please try again.";
+
+        alert(message);
       }
     } else {
       try {
         const data = await login(email, password);
-        dispatch(setUser(data));
-        setopem(false);
-        clearform();
-      } catch (error) {
-        console.log(error);
+        completeLogin(data);
+      } catch (error: any) {
+        console.error(error);
+
+        const message =
+          error?.response?.data?.message ||
+          error?.response?.data ||
+          "Login failed. Please check your email and password.";
+
+        alert(message);
       }
     }
   };
+
   const clearform = () => {
     setFirstName("");
     setLastName("");
@@ -55,22 +88,24 @@ const SignupDialog = ({trigger}:any) => {
     setPassword("");
     setPhoneNumber("");
   };
+
   return (
     <Dialog open={open} onOpenChange={setopem}>
-      <DialogTrigger asChild>
-        {trigger}
-      </DialogTrigger>
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+
       <DialogContent className="sm:max-w-[425px] bg-white">
         <DialogHeader>
           <DialogTitle className="text-2xl font-bold">
             {isSignup ? "Create Account" : "Welcome Back"}
           </DialogTitle>
+
           <DialogDescription>
             {isSignup
               ? "Join us to start booking your travels."
               : "Enter your credentials to access your account."}
           </DialogDescription>
         </DialogHeader>
+
         <form onSubmit={handleAuth} className="space-y-4 py-4">
           {isSignup && (
             <div className="grid grid-cols-2 gap-4">
@@ -83,6 +118,7 @@ const SignupDialog = ({trigger}:any) => {
                   required
                 />
               </div>
+
               <div className="space-y-2">
                 <Label htmlFor="lastName">Last Name</Label>
                 <Input
@@ -94,6 +130,7 @@ const SignupDialog = ({trigger}:any) => {
               </div>
             </div>
           )}
+
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <Input
@@ -104,6 +141,7 @@ const SignupDialog = ({trigger}:any) => {
               required
             />
           </div>
+
           <div className="space-y-2">
             <Label htmlFor="password">Password</Label>
             <Input
@@ -114,6 +152,7 @@ const SignupDialog = ({trigger}:any) => {
               required
             />
           </div>
+
           {isSignup && (
             <div className="space-y-2">
               <Label htmlFor="phoneNumber">Phone Number</Label>
@@ -126,6 +165,7 @@ const SignupDialog = ({trigger}:any) => {
               />
             </div>
           )}
+
           <Button
             type="submit"
             className="w-full bg-blue-600 text-white"
@@ -134,6 +174,7 @@ const SignupDialog = ({trigger}:any) => {
             {isSignup ? "Sign Up" : "Login"}
           </Button>
         </form>
+
         <div className="text-center text-sm">
           {isSignup ? (
             <>

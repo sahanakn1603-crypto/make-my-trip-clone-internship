@@ -15,7 +15,12 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { getflight, handleflightbooking } from "@/api";
+import {
+  getflight,
+  getFlightPrice,
+  getFlightPriceHistory,
+  handleflightbooking,
+} from "@/api";
 import { useDispatch, useSelector } from "react-redux";
 interface Flight {
   id: string; // Unique identifier for the flight
@@ -48,8 +53,41 @@ const BookFlightPage = () => {
   const [loading, setLoading] = useState(true);
   const [quantity, setQuantity] = useState(1);
   const [open, setopem] = useState(false);
+  const [dynamicPrice, setDynamicPrice] = useState<number>(0);
+  const [basePrice, setBasePrice] = useState<number>(0);
+  const [peakAdjustment, setPeakAdjustment] = useState<number>(0);
+  const [holidayAdjustment, setHolidayAdjustment] = useState<number>(0);
+  const [demandAdjustment, setDemandAdjustment] = useState<number>(0);
+  const [priceLoading, setPriceLoading] = useState<boolean>(true);
+  const [priceHistory, setPriceHistory] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState<boolean>(true);
   const user = useSelector((state: any) => state.user.user);
   const dispatch = useDispatch();
+  const [authenticatedUser, setAuthenticatedUser] = useState<any>(null);
+
+  useEffect(() => {
+    try {
+      const savedUser = localStorage.getItem("user");
+
+      if (savedUser) {
+        const parsedUser = JSON.parse(savedUser);
+        setAuthenticatedUser(parsedUser);
+      } else if (user) {
+        setAuthenticatedUser(user);
+      }
+    } catch (error) {
+      console.error("Error restoring user:", error);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (user) {
+      setAuthenticatedUser(user);
+    }
+  }, [user]);
+
+  const currentUser = authenticatedUser || user;
+
   useEffect(() => {
     const fetchFlights = async () => {
       try {
@@ -57,6 +95,33 @@ const BookFlightPage = () => {
         const filteredData = data.filter((flight: any) => flight.id === id);
         setFlights(filteredData);
         console.log(filteredData);
+
+        if (filteredData.length > 0) {
+          try {
+            setPriceLoading(true);
+            const pricing = await getFlightPrice(filteredData[0].id);
+            setBasePrice(pricing.basePrice);
+            setDynamicPrice(pricing.dynamicPrice);
+            setPeakAdjustment(pricing.peakAdjustment);
+            setHolidayAdjustment(pricing.holidayAdjustment);
+            setDemandAdjustment(pricing.demandAdjustment);
+          } catch (pricingError) {
+            console.error("Error fetching dynamic pricing:", pricingError);
+          } finally {
+            setPriceLoading(false);
+          }
+
+          try {
+            setHistoryLoading(true);
+            const history = await getFlightPriceHistory(filteredData[0].id);
+            setPriceHistory(Array.isArray(history) ? history : []);
+          } catch (historyError) {
+            console.error("Error fetching price history:", historyError);
+            setPriceHistory([]);
+          } finally {
+            setHistoryLoading(false);
+          }
+        }
       } catch (error) {
         console.error("Error fetching flights:", error);
       } finally {
@@ -64,7 +129,7 @@ const BookFlightPage = () => {
       }
     };
     fetchFlights();
-  }, [id, user]);
+  }, [id]);
 
   if (loading) {
     return <Loader />;
@@ -158,7 +223,10 @@ const BookFlightPage = () => {
     );
   };
 
-  const totalPrice = flight?.price * quantity;
+  const currentFlightPrice =
+    dynamicPrice > 0 ? dynamicPrice : flight?.price || 0;
+
+  const totalPrice = currentFlightPrice * quantity;
   const totalTaxes = fareSummary?.taxes * quantity;
   const totalOtherServices = fareSummary?.otherServices * quantity;
   const totalDiscounts = fareSummary?.discounts * quantity;
@@ -169,14 +237,14 @@ const BookFlightPage = () => {
     e.preventDefault();
     try {
       const data = await handleflightbooking(
-        user?.id,
+        currentUser?.id,
         flight?.id,
         quantity,
         grandTotal
       );
       const updateuser = {
-        ...user,
-        bookings: [...user.bookings, data],
+        ...currentUser,
+        bookings: [...(currentUser?.bookings || []), data],
       };
       dispatch(setUser(updateuser));
       setopem(false);
@@ -186,6 +254,239 @@ const BookFlightPage = () => {
       console.log(error);
     }
   };
+  const historyValues = priceHistory
+    .map((item) => Number(item.dynamicPrice))
+    .filter((value) => Number.isFinite(value));
+
+  const graphMin =
+    historyValues.length > 0
+      ? Math.min(...historyValues)
+      : currentFlightPrice;
+
+  const graphMax =
+    historyValues.length > 0
+      ? Math.max(...historyValues)
+      : currentFlightPrice;
+
+  // Keep the real lowest/highest values for the summary below the graph.
+  // When there is only one recorded price, add visual padding so the
+  // Y-axis does not show duplicate/near-identical labels.
+  const graphDisplayMin =
+    priceHistory.length === 1
+      ? graphMin - 100
+      : graphMin;
+
+  const graphDisplayMax =
+    priceHistory.length === 1
+      ? graphMax + 100
+      : graphMax;
+
+  const graphRange = Math.max(
+    graphDisplayMax - graphDisplayMin,
+    1
+  );
+
+  const graphWidth = 620;
+  const graphHeight = 210;
+  const graphPaddingLeft = 58;
+  const graphPaddingRight = 18;
+  const graphPaddingTop = 22;
+  const graphPaddingBottom = 42;
+
+  const graphInnerWidth =
+    graphWidth - graphPaddingLeft - graphPaddingRight;
+
+  const graphInnerHeight =
+    graphHeight - graphPaddingTop - graphPaddingBottom;
+
+  const graphPoints = priceHistory.map((item, index) => {
+    const value = Number(item.dynamicPrice);
+    const x =
+      priceHistory.length === 1
+        ? graphPaddingLeft + graphInnerWidth / 2
+        : graphPaddingLeft +
+          (index / (priceHistory.length - 1)) * graphInnerWidth;
+
+    const y =
+      graphPaddingTop +
+      ((graphDisplayMax - value) / graphRange) * graphInnerHeight;
+
+    return {
+      x,
+      y,
+      value,
+      recordedAt: item.recordedAt,
+    };
+  });
+
+  const graphPath =
+    graphPoints.length > 1
+      ? graphPoints
+          .map((point, index) =>
+            `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`
+          )
+          .join(" ")
+      : "";
+
+  const formatHistoryTime = (value: string) => {
+    try {
+      return new Date(value).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return "";
+    }
+  };
+
+  const PriceHistoryCard = () => (
+    <div className="bg-white rounded-xl shadow-sm p-6">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+        <div>
+          <h2 className="text-lg font-bold flex items-center">
+            <Clock className="w-5 h-5 mr-2 text-blue-600" />
+            Price History
+          </h2>
+          <p className="text-sm text-gray-500 mt-1">
+            See how the dynamic flight price has changed over time.
+          </p>
+        </div>
+
+        {priceHistory.length > 0 && (
+          <span className="text-xs bg-blue-50 text-blue-600 px-3 py-1 rounded-full">
+            {priceHistory.length} price updates
+          </span>
+        )}
+      </div>
+
+      {historyLoading ? (
+        <div className="h-56 flex items-center justify-center text-gray-500">
+          Loading price history...
+        </div>
+      ) : priceHistory.length === 0 ? (
+        <div className="h-56 flex items-center justify-center text-gray-500 text-sm">
+          Price history will appear as the pricing engine records updates.
+        </div>
+      ) : (
+        <>
+          <div className="w-full overflow-x-auto mt-4">
+            <svg
+              viewBox={`0 0 ${graphWidth} ${graphHeight}`}
+              className="w-full min-w-[560px] h-56"
+              role="img"
+              aria-label="Flight price history graph"
+            >
+              {[0, 0.5, 1].map((position) => {
+                const y =
+                  graphPaddingTop + position * graphInnerHeight;
+                const value =
+                  graphDisplayMax - position * graphRange;
+
+                return (
+                  <g key={position}>
+                    <line
+                      x1={graphPaddingLeft}
+                      y1={y}
+                      x2={graphWidth - graphPaddingRight}
+                      y2={y}
+                      stroke="#e5e7eb"
+                      strokeWidth="1"
+                    />
+                    <text
+                      x={graphPaddingLeft - 8}
+                      y={y + 4}
+                      textAnchor="end"
+                      fontSize="11"
+                      fill="#6b7280"
+                    >
+                      ₹{Math.round(value).toLocaleString()}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {graphPath && (
+                <path
+                  d={graphPath}
+                  fill="none"
+                  stroke="#2563eb"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              )}
+
+              {graphPoints.map((point, index) => (
+                <g key={`${point.recordedAt}-${index}`}>
+                  <circle
+                    cx={point.x}
+                    cy={point.y}
+                    r="5"
+                    fill="white"
+                    stroke="#2563eb"
+                    strokeWidth="3"
+                  />
+                  <title>
+                    ₹{Math.round(point.value).toLocaleString()} •{" "}
+                    {formatHistoryTime(point.recordedAt)}
+                  </title>
+                </g>
+              ))}
+
+              {graphPoints.length > 0 && (
+                <>
+                  <text
+                    x={graphPoints[0].x}
+                    y={graphHeight - 15}
+                    textAnchor="start"
+                    fontSize="11"
+                    fill="#6b7280"
+                  >
+                    {formatHistoryTime(graphPoints[0].recordedAt)}
+                  </text>
+
+                  <text
+                    x={graphPoints[graphPoints.length - 1].x}
+                    y={graphHeight - 15}
+                    textAnchor="end"
+                    fontSize="11"
+                    fill="#6b7280"
+                  >
+                    {formatHistoryTime(
+                      graphPoints[graphPoints.length - 1].recordedAt
+                    )}
+                  </text>
+                </>
+              )}
+            </svg>
+          </div>
+
+          <div className="mt-3 flex flex-wrap justify-between gap-2 text-sm">
+            <span className="text-gray-500">
+              Lowest recorded price:{" "}
+              <strong className="text-gray-800">
+                ₹{Math.round(graphMin).toLocaleString()}
+              </strong>
+            </span>
+
+            <span className="text-gray-500">
+              Highest recorded price:{" "}
+              <strong className="text-gray-800">
+                ₹{Math.round(graphMax).toLocaleString()}
+              </strong>
+            </span>
+          </div>
+
+          <div className="mt-3 p-3 bg-blue-50 rounded-lg text-sm text-blue-700">
+            Prices are calculated dynamically using demand, peak travel and
+            holiday factors. The graph shows recorded prices from the pricing
+            engine.
+          </div>
+        </>
+      )}
+    </div>
+  );
+
   const BookingContent = () => (
     <DialogContent className="sm:max-w-[600px] bg-white">
       <DialogHeader>
@@ -263,7 +564,39 @@ const BookFlightPage = () => {
             <div className="flex justify-between items-center">
               <span className="text-gray-600">Base Fare</span>
               <span className="font-medium">
-                ₹ {totalPrice.toLocaleString()}
+                {priceLoading
+                  ? "Updating..."
+                  : `₹ ${basePrice.toLocaleString()}`}
+              </span>
+            </div>
+
+            {peakAdjustment > 0 && (
+              <div className="flex justify-between items-center text-orange-600">
+                <span>Peak Travel Adjustment</span>
+                <span>+ ₹ {Math.round(peakAdjustment).toLocaleString()}</span>
+              </div>
+            )}
+
+            {holidayAdjustment > 0 && (
+              <div className="flex justify-between items-center text-orange-600">
+                <span>Holiday Adjustment</span>
+                <span>+ ₹ {Math.round(holidayAdjustment).toLocaleString()}</span>
+              </div>
+            )}
+
+            {demandAdjustment > 0 && (
+              <div className="flex justify-between items-center text-orange-600">
+                <span>Demand Adjustment</span>
+                <span>+ ₹ {Math.round(demandAdjustment).toLocaleString()}</span>
+              </div>
+            )}
+
+            <div className="flex justify-between items-center">
+              <span className="text-gray-600">Current Flight Price</span>
+              <span className="font-medium">
+                {priceLoading
+                  ? "Updating..."
+                  : `₹ ${currentFlightPrice.toLocaleString()}`}
               </span>
             </div>
             <div className="flex justify-between items-center">
@@ -396,6 +729,9 @@ const BookFlightPage = () => {
               </div>
             </div>
 
+            {/* Price History */}
+            <PriceHistoryCard />
+
             {/* Cancellation Policy */}
             <div className="bg-white rounded-xl shadow-sm p-6">
               <div className="flex justify-between items-center mb-6">
@@ -491,12 +827,44 @@ const BookFlightPage = () => {
                 Fare Summary
               </h2>
               <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Base Fare</span>
-                  <span className="font-medium">
-                    ₹ {totalPrice.toLocaleString()}
-                  </span>
-                </div>
+            <div className="flex justify-between items-center">
+              <span className="text-gray-600">Base Fare</span>
+              <span className="font-medium">
+                {priceLoading
+                  ? "Updating..."
+                  : `₹ ${basePrice.toLocaleString()}`}
+              </span>
+            </div>
+
+            {peakAdjustment > 0 && (
+              <div className="flex justify-between items-center text-orange-600">
+                <span>Peak Travel Adjustment</span>
+                <span>+ ₹ {Math.round(peakAdjustment).toLocaleString()}</span>
+              </div>
+            )}
+
+            {holidayAdjustment > 0 && (
+              <div className="flex justify-between items-center text-orange-600">
+                <span>Holiday Adjustment</span>
+                <span>+ ₹ {Math.round(holidayAdjustment).toLocaleString()}</span>
+              </div>
+            )}
+
+            {demandAdjustment > 0 && (
+              <div className="flex justify-between items-center text-orange-600">
+                <span>Demand Adjustment</span>
+                <span>+ ₹ {Math.round(demandAdjustment).toLocaleString()}</span>
+              </div>
+            )}
+
+            <div className="flex justify-between items-center">
+              <span className="text-gray-600">Current Flight Price</span>
+              <span className="font-medium">
+                {priceLoading
+                  ? "Updating..."
+                  : `₹ ${currentFlightPrice.toLocaleString()}`}
+              </span>
+            </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">Taxes and Surcharges</span>
                   <span className="font-medium">
@@ -530,7 +898,7 @@ const BookFlightPage = () => {
                     Book Now
                   </Button>
                 </DialogTrigger>
-                {user ? (
+                {currentUser ? (
                   <BookingContent />
                 ) : (
                   <DialogContent className="bg-white">
@@ -539,8 +907,17 @@ const BookFlightPage = () => {
                     </DialogHeader>
                     <p>Please log in to continue with your booking.</p>
                     <SignupDialog
+                      onSuccess={(loggedInUser: any) => {
+                        setAuthenticatedUser(loggedInUser);
+                        localStorage.setItem(
+                          "user",
+                          JSON.stringify(loggedInUser)
+                        );
+                      }}
                       trigger={
-                        <Button className="w-full">Log In / Sign Up</Button>
+                        <Button className="w-full">
+                          Log In / Sign Up
+                        </Button>
                       }
                     />
                   </DialogContent>

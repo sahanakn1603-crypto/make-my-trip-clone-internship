@@ -2,8 +2,10 @@ package com.makemytrip.makemytrip.services;
 import com.makemytrip.makemytrip.models.Users;
 import com.makemytrip.makemytrip.repositories.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class UserServices{
@@ -22,7 +24,10 @@ public class UserServices{
 
     public Users signup(Users user){
         if(userRepository.findByEmail(user.getEmail())!= null){
-            throw new RuntimeException("Email is already registered");
+            throw new ResponseStatusException(
+        HttpStatus.CONFLICT,
+        "Email is already registered"
+);
         }
         user.setPassword(passwordEncoder.encode((user.getPassword())));
         if (user.getRole()== null){
