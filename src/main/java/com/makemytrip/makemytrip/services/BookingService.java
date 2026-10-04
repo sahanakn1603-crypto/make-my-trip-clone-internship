@@ -15,7 +15,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
-
 import java.time.LocalDateTime;
 import java.util.Optional;
 
@@ -38,34 +37,21 @@ public class BookingService {
     private PricingService pricingService;
 
 
-    /*
-     * =========================================================
-     * FLIGHT BOOKING
-     * =========================================================
-     *
-     * IMPORTANT:
-     *
-     * The price received from the frontend is NOT trusted.
-     *
-     * The backend determines the actual flight price:
-     *
-     * 1. If the user has an ACTIVE price freeze:
-     *      use the locked price.
-     *
-     * 2. Otherwise:
-     *      calculate the current dynamic price.
-     *
-     * This prevents the frontend from changing the booking price.
-     */
+    // =========================================================
+    // FLIGHT BOOKING
+    // =========================================================
+
     public Booking bookFlight(
             String userId,
             String flightId,
             int seats,
-            double price) {
+            double price,
+            String date) {
 
-        /*
-         * Validate basic input.
-         */
+        // -----------------------------------------------------
+        // VALIDATION
+        // -----------------------------------------------------
+
         if (userId == null || userId.isBlank()) {
             throw new RuntimeException("User ID is required");
         }
@@ -75,20 +61,24 @@ public class BookingService {
         }
 
         if (seats <= 0) {
-            throw new RuntimeException("Number of seats must be greater than zero");
+            throw new RuntimeException(
+                    "Number of seats must be greater than zero"
+            );
         }
 
 
-        /*
-         * Find user.
-         */
+        // -----------------------------------------------------
+        // FIND USER
+        // -----------------------------------------------------
+
         Optional<Users> usersOptional =
                 userRepository.findById(userId);
 
 
-        /*
-         * Find flight.
-         */
+        // -----------------------------------------------------
+        // FIND FLIGHT
+        // -----------------------------------------------------
+
         Optional<Flight> flightOptional =
                 flightRepository.findById(flightId);
 
@@ -106,10 +96,66 @@ public class BookingService {
         Flight flight = flightOptional.get();
 
 
-        /*
-         * Check seat availability.
-         */
+        // -----------------------------------------------------
+        // VALIDATE SELECTED TRAVEL DATE
+        // -----------------------------------------------------
+
+        LocalDate bookingDate;
+
+        if (date == null || date.isBlank()) {
+            if (flight.getDepartureTime() == null ||
+                    flight.getDepartureTime().isBlank()) {
+                throw new RuntimeException(
+                        "Please select an updated travel date"
+                );
+            }
+
+            try {
+                bookingDate = LocalDate.parse(
+                        flight.getDepartureTime().substring(0, 10)
+                );
+            } catch (Exception e) {
+                throw new RuntimeException(
+                        "Invalid flight travel date"
+                );
+            }
+        } else {
+            try {
+                bookingDate = LocalDate.parse(date);
+            } catch (Exception e) {
+                throw new RuntimeException(
+                        "Invalid travel date. Please select an updated date"
+                );
+            }
+        }
+
+        if (bookingDate.isBefore(LocalDate.now())) {
+            throw new RuntimeException(
+                    "This date has already passed. Please select an updated date"
+            );
+        }
+
+        if (flight.getDepartureTime() != null &&
+                !flight.getDepartureTime().isBlank()) {
+
+            String flightDate =
+                    flight.getDepartureTime().substring(0, 10);
+
+            if (!flightDate.equals(bookingDate.toString())) {
+                throw new RuntimeException(
+                        "The selected date does not match this flight. " +
+                        "Please select the correct travel date"
+                );
+            }
+        }
+
+
+        // -----------------------------------------------------
+        // CHECK SEAT AVAILABILITY
+        // -----------------------------------------------------
+
         if (flight.getAvailableSeats() < seats) {
+
             throw new RuntimeException(
                     "Not enough seats available. Available seats: "
                             + flight.getAvailableSeats()
@@ -117,11 +163,9 @@ public class BookingService {
         }
 
 
-        /*
-         * =====================================================
-         * SERVER-SIDE PRICE CALCULATION
-         * =====================================================
-         */
+        // =====================================================
+        // SERVER-SIDE PRICE CALCULATION
+        // =====================================================
 
         double bookingPricePerSeat;
 
@@ -134,24 +178,23 @@ public class BookingService {
                         );
 
 
-        /*
-         * Check whether an ACTIVE freeze is still valid.
-         */
+        // -----------------------------------------------------
+        // CHECK ACTIVE PRICE FREEZE
+        // -----------------------------------------------------
+
         if (activeFreeze.isPresent()) {
 
-            PriceFreeze freeze = activeFreeze.get();
+            PriceFreeze freeze =
+                    activeFreeze.get();
 
             if (freeze.getExpiresAt() != null &&
-                    freeze.getExpiresAt().isAfter(LocalDateTime.now())) {
+                    freeze.getExpiresAt()
+                            .isAfter(LocalDateTime.now())) {
 
-                /*
-                 * ---------------------------------------------
-                 * PRICE FREEZE IS ACTIVE
-                 * ---------------------------------------------
-                 *
-                 * Use the locked price instead of the
-                 * current dynamic price.
-                 */
+                // -------------------------------------------------
+                // ACTIVE FREEZE
+                // -------------------------------------------------
+
                 bookingPricePerSeat =
                         freeze.getLockedPrice();
 
@@ -172,7 +215,8 @@ public class BookingService {
                 );
 
                 System.out.println(
-                        "Locked Price: ₹" + bookingPricePerSeat
+                        "Locked Price: ₹"
+                                + bookingPricePerSeat
                 );
 
                 System.out.println(
@@ -185,18 +229,16 @@ public class BookingService {
 
             } else {
 
-                /*
-                 * Freeze has expired.
-                 */
+                // -------------------------------------------------
+                // FREEZE EXPIRED
+                // -------------------------------------------------
+
                 freeze.setStatus("EXPIRED");
 
                 priceFreezeRepository.save(freeze);
 
                 activeFreeze = Optional.empty();
 
-                /*
-                 * Calculate current dynamic price.
-                 */
                 bookingPricePerSeat =
                         pricingService
                                 .calculatePrice(flight)
@@ -211,14 +253,10 @@ public class BookingService {
 
         } else {
 
-            /*
-             * =================================================
-             * NO ACTIVE FREEZE
-             * =================================================
-             *
-             * Calculate the current price from the
-             * Dynamic Pricing Engine.
-             */
+            // -----------------------------------------------------
+            // NO ACTIVE FREEZE
+            // -----------------------------------------------------
+
             bookingPricePerSeat =
                     pricingService
                             .calculatePrice(flight)
@@ -231,24 +269,18 @@ public class BookingService {
         }
 
 
-        /*
-         * =====================================================
-         * SERVER-CALCULATED TOTAL
-         * =====================================================
-         *
-         * The frontend "price" parameter is intentionally
-         * ignored for the flight fare.
-         *
-         * This prevents users from manipulating the price
-         * through browser requests.
-         */
+        // =====================================================
+        // SERVER-CALCULATED TOTAL
+        // =====================================================
+
         double serverCalculatedTotal =
                 bookingPricePerSeat * seats;
 
 
-        /*
-         * Reduce available seats.
-         */
+        // =====================================================
+        // REDUCE AVAILABLE SEATS
+        // =====================================================
+
         flight.setAvailableSeats(
                 flight.getAvailableSeats() - seats
         );
@@ -256,62 +288,64 @@ public class BookingService {
         flightRepository.save(flight);
 
 
-        /*
-         * =====================================================
-         * CREATE BOOKING
-         * =====================================================
-         */
+        // =====================================================
+        // CREATE BOOKING
+        // =====================================================
+
         Booking booking = new Booking();
 
         booking.setType("Flight");
 
         booking.setBookingId(flightId);
 
-        booking.setDate(
-                LocalDateTime.now().toString()
-        );
+
+        // Store exactly the date selected by the user.
+        booking.setDate(bookingDate.toString());
+
 
         booking.setQuantity(seats);
 
         /*
          * IMPORTANT:
          *
-         * Store the price calculated by the backend,
-         * not the price supplied by the frontend.
+         * "price" is the final amount shown to the user,
+         * including the fare, taxes, services, discounts
+         * and selected seat upgrades.
+         *
+         * The dynamic pricing engine still calculates
+         * the server-side fare above, but the booking record
+         * must store the actual final checkout amount.
          */
-        booking.setTotalPrice(
-                serverCalculatedTotal
-        );
+        if (price <= 0) {
+            throw new RuntimeException(
+                    "Invalid booking amount"
+            );
+        }
+
+        booking.setTotalPrice(price);
 
 
-        /*
-         * Add booking to user.
-         */
+        // =====================================================
+        // ADD BOOKING TO USER
+        // =====================================================
+
         user.getBookings().add(booking);
 
         userRepository.save(user);
 
 
-        /*
-         * =====================================================
-         * CONSUME PRICE FREEZE
-         * =====================================================
-         *
-         * Once the booking has successfully been created,
-         * the freeze is marked USED.
-         *
-         * This prevents the same frozen price from being
-         * reused for another separate booking.
-         */
+        // =====================================================
+        // CONSUME PRICE FREEZE
+        // =====================================================
+
         if (activeFreeze.isPresent()) {
 
-            PriceFreeze freeze = activeFreeze.get();
+            PriceFreeze freeze =
+                    activeFreeze.get();
 
-            /*
-             * Only mark it USED if it was actually valid.
-             */
             if (freeze.getExpiresAt() != null &&
-                    freeze.getExpiresAt().isAfter(LocalDateTime.now())) {
+                    freeze.getExpiresAt()
+                            .isAfter(LocalDateTime.now())) {
 
                 freeze.setStatus("USED");
 
@@ -324,90 +358,367 @@ public class BookingService {
         }
 
 
-        /*
-         * Return the completed booking.
-         */
         return booking;
     }
 
 
-    /*
-     * =========================================================
-     * HOTEL BOOKING
-     * =========================================================
-     *
-     * Existing hotel booking logic is preserved.
-     */
+    // =========================================================
+    // HOTEL BOOKING
+    // =========================================================
+
     public Booking bookhotel(
             String userId,
             String hotelId,
             int rooms,
-            double price) {
+            double price,
+            String roomType,
+            String date) {
+
+
+        // -----------------------------------------------------
+        // BASIC VALIDATION
+        // -----------------------------------------------------
+
+        if (userId == null || userId.isBlank()) {
+
+            throw new RuntimeException(
+                    "User ID is required"
+            );
+        }
+
+
+        if (hotelId == null || hotelId.isBlank()) {
+
+            throw new RuntimeException(
+                    "Hotel ID is required"
+            );
+        }
+
+
+        if (rooms <= 0) {
+
+            throw new RuntimeException(
+                    "Number of rooms must be greater than zero"
+            );
+        }
+
+
+        // =====================================================
+        // DATE VALIDATION
+        // =====================================================
+
+        /*
+         * A hotel booking MUST have a date.
+         *
+         * We do not automatically use today's date because
+         * the user may have selected an old date.
+         */
+
+        if (date == null || date.isBlank()) {
+
+            throw new RuntimeException(
+                    "Please select an updated check-in date"
+            );
+        }
+
+
+        LocalDate selectedDate;
+
+        try {
+
+            selectedDate =
+                    LocalDate.parse(date);
+
+        } catch (Exception e) {
+
+            throw new RuntimeException(
+                    "Invalid booking date. Please select an updated date"
+            );
+        }
+
+
+        LocalDate today =
+                LocalDate.now();
+
+
+        /*
+         * IMPORTANT:
+         *
+         * Previous dates are NOT allowed.
+         */
+
+        if (selectedDate.isBefore(today)) {
+
+            throw new RuntimeException(
+                    "This date has already passed. "
+                            + "Please select an updated date"
+            );
+        }
+
+
+        // =====================================================
+        // ROOM TYPE
+        // =====================================================
+
+        String normalizedRoomType =
+                roomType == null ||
+                roomType.isBlank()
+                        ? "STANDARD"
+                        : roomType
+                                .trim()
+                                .toUpperCase();
+
+
+        if (!normalizedRoomType.equals("STANDARD")
+                && !normalizedRoomType.equals("DELUXE")
+                && !normalizedRoomType.equals("PREMIUM")) {
+
+            throw new RuntimeException(
+                    "Invalid room type. "
+                            + "Use STANDARD, DELUXE or PREMIUM"
+            );
+        }
+
+
+        // =====================================================
+        // FIND USER
+        // =====================================================
 
         Optional<Users> usersOptional =
                 userRepository.findById(userId);
+
+
+        // =====================================================
+        // FIND HOTEL
+        // =====================================================
 
         Optional<Hotel> hotelOptional =
                 hotelRepository.findById(hotelId);
 
 
-        if (usersOptional.isPresent()
-                && hotelOptional.isPresent()) {
+        if (usersOptional.isEmpty()) {
 
-            Users user = usersOptional.get();
-
-            Hotel hotel = hotelOptional.get();
-
-
-            /*
-             * Check room availability.
-             */
-            if (hotel.getAvailableRooms() >= rooms) {
-
-                hotel.setAvailableRooms(
-                        hotel.getAvailableRooms() - rooms
-                );
-
-                hotelRepository.save(hotel);
-
-
-                Booking booking = new Booking();
-
-                booking.setType("Hotel");
-
-                booking.setBookingId(hotelId);
-
-                booking.setDate(
-                        LocalDateTime.now().toString()
-                );
-
-                booking.setQuantity(rooms);
-
-                /*
-                 * Existing hotel behaviour preserved.
-                 */
-                booking.setTotalPrice(price);
-
-
-                user.getBookings().add(booking);
-
-                userRepository.save(user);
-
-
-                return booking;
-
-            } else {
-
-                throw new RuntimeException(
-                        "Not enough rooms available"
-                );
-            }
-
+            throw new RuntimeException(
+                    "User not found"
+            );
         }
 
 
-        throw new RuntimeException(
-                "User or hotel not found"
+        if (hotelOptional.isEmpty()) {
+
+            throw new RuntimeException(
+                    "Hotel not found"
+            );
+        }
+
+
+        Users user =
+                usersOptional.get();
+
+        Hotel hotel =
+                hotelOptional.get();
+
+
+        // =====================================================
+        // INITIALIZE ROOM AVAILABILITY
+        // =====================================================
+
+        /*
+         * Existing hotels created before Task 4 may not have
+         * room-type availability.
+         */
+
+        hotel.initializeRoomTypeAvailabilityIfNeeded();
+
+
+        int typeAvailability;
+
+
+        // =====================================================
+        // CHECK SELECTED ROOM TYPE
+        // =====================================================
+
+        switch (normalizedRoomType) {
+
+            case "DELUXE":
+
+                typeAvailability =
+                        hotel.getDeluxeRooms();
+
+                break;
+
+
+            case "PREMIUM":
+
+                typeAvailability =
+                        hotel.getPremiumRooms();
+
+                break;
+
+
+            default:
+
+                typeAvailability =
+                        hotel.getStandardRooms();
+
+                break;
+        }
+
+
+        // =====================================================
+        // CHECK ROOM AVAILABILITY
+        // =====================================================
+
+        if (typeAvailability < rooms) {
+
+            throw new RuntimeException(
+                    "Not enough "
+                            + normalizedRoomType.toLowerCase()
+                            + " rooms available. Available: "
+                            + typeAvailability
+            );
+        }
+
+
+        // =====================================================
+        // REDUCE ROOM AVAILABILITY
+        // =====================================================
+
+        switch (normalizedRoomType) {
+
+            case "DELUXE":
+
+                hotel.setDeluxeRooms(
+                        hotel.getDeluxeRooms() - rooms
+                );
+
+                break;
+
+
+            case "PREMIUM":
+
+                hotel.setPremiumRooms(
+                        hotel.getPremiumRooms() - rooms
+                );
+
+                break;
+
+
+            default:
+
+                hotel.setStandardRooms(
+                        hotel.getStandardRooms() - rooms
+                );
+
+                break;
+        }
+
+
+        // =====================================================
+        // UPDATE TOTAL AVAILABLE ROOMS
+        // =====================================================
+
+        hotel.setAvailableRooms(
+                hotel.getStandardRooms()
+                        + hotel.getDeluxeRooms()
+                        + hotel.getPremiumRooms()
         );
+
+
+        hotelRepository.save(hotel);
+
+
+        // =====================================================
+        // CREATE HOTEL BOOKING
+        // =====================================================
+
+        Booking booking =
+                new Booking();
+
+
+        booking.setType(
+                "Hotel"
+        );
+
+
+        booking.setBookingId(
+                hotelId
+        );
+
+
+        /*
+         * IMPORTANT:
+         *
+         * Store the date selected by the user.
+         *
+         * DO NOT use LocalDateTime.now().
+         */
+
+        booking.setDate(
+                selectedDate.toString()
+        );
+
+
+        booking.setQuantity(
+                rooms
+        );
+
+
+        booking.setTotalPrice(
+                price
+        );
+
+
+        // =====================================================
+        // SAVE BOOKING
+        // =====================================================
+
+        user.getBookings().add(
+                booking
+        );
+
+        userRepository.save(
+                user
+        );
+
+
+        System.out.println(
+                "========================================"
+        );
+
+        System.out.println(
+                "🏨 HOTEL BOOKING CREATED"
+        );
+
+        System.out.println(
+                "Hotel ID: " + hotelId
+        );
+
+        System.out.println(
+                "User ID: " + userId
+        );
+
+        System.out.println(
+                "Room Type: " + normalizedRoomType
+        );
+
+        System.out.println(
+                "Rooms: " + rooms
+        );
+
+        System.out.println(
+                "Booking Date: " + selectedDate
+        );
+
+        System.out.println(
+                "Total Price: ₹" + price
+        );
+
+        System.out.println(
+                "========================================"
+        );
+
+
+        return booking;
     }
 }

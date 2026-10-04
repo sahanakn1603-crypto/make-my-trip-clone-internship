@@ -1,7 +1,16 @@
-import { getflight, gethotel } from "@/api";
+import {
+  getflight,
+  gethotel,
+  getRecommendations,
+  sendRecommendationFeedback,
+  getRecommendationFeedback,
+  getuserbyemail,
+} from "@/api";
+
 import Loader from "@/components/Loader";
 import { SearchSelect } from "@/components/SearchSelect";
 import { Button } from "@/components/ui/button";
+
 import {
   Bus,
   Calendar,
@@ -17,6 +26,7 @@ import {
   Umbrella,
   Users,
 } from "lucide-react";
+
 import { useRouter } from "next/router";
 import { useEffect, useMemo, useState } from "react";
 import { useSelector } from "react-redux";
@@ -32,6 +42,14 @@ function Home() {
   const [hotel, sethotel] = useState<any[]>([]);
   const [loading, setloading] = useState(true);
   const [flight, setflight] = useState<any[]>([]);
+
+  // TASK 6 - Personalized recommendations
+  const [recommendations, setRecommendations] = useState<any[]>([]);
+  const [recommendationLoading, setRecommendationLoading] = useState(true);
+  const [feedbackLoading, setFeedbackLoading] = useState<string | null>(null);
+  const [feedbackStatus, setFeedbackStatus] = useState<
+    Record<string, "HELPFUL" | "IRRELEVANT">
+  >({});
 
   const user = useSelector((state: any) => state.user.user);
   const router = useRouter();
@@ -134,6 +152,68 @@ function Home() {
     };
 
     fetchdata();
+
+    const fetchRecommendations = async () => {
+      if (!user?.email) {
+        setRecommendations([]);
+        setRecommendationLoading(false);
+        return;
+      }
+
+      try {
+        setRecommendationLoading(true);
+
+        const recommendationData =
+          await getRecommendations(user.email);
+
+        setRecommendations(
+          Array.isArray(recommendationData)
+            ? recommendationData
+            : []
+        );
+
+        // Restore the user's saved feedback so the correct
+        // button remains selected after page refresh.
+        const fullUser = await getuserbyemail(user.email);
+
+        const userId =
+          fullUser?.id ||
+          fullUser?._id;
+
+        if (userId) {
+          const savedFeedback =
+            await getRecommendationFeedback(userId);
+
+          const feedbackMap: Record<
+            string,
+            "HELPFUL" | "IRRELEVANT"
+          > = {};
+
+          if (Array.isArray(savedFeedback)) {
+            savedFeedback.forEach((item: any) => {
+              if (
+                item?.targetType &&
+                item?.targetId &&
+                item?.feedback
+              ) {
+                feedbackMap[
+                  `${item.targetType}:${item.targetId}`
+                ] = item.feedback;
+              }
+            });
+          }
+
+          setFeedbackStatus(feedbackMap);
+        }
+      } catch (error) {
+        console.error("Recommendation fetch error:", error);
+        setRecommendations([]);
+      } finally {
+        setRecommendationLoading(false);
+      }
+    };
+
+    fetchRecommendations();
   }, [user]);
 
   const cityOptions = useMemo(() => {
@@ -156,9 +236,252 @@ function Home() {
     }));
   }, [flight, hotel]);
 
+  /*
+   * ONLY THESE FLIGHT ROUTES ARE AVAILABLE.
+   *
+   * These are exactly the routes provided by you.
+   * Reverse routes are also included.
+   */
+  const allowedFlightRoutes: Record<string, string[]> = {
+    Bengaluru: [
+      "Pune",
+      "Ahmedabad",
+      "Jaipur",
+      "Goa",
+      "Delhi",
+      "Mumbai",
+      "Hyderabad",
+      "Chennai",
+      "Kolkata",
+    ],
+
+    Pune: [
+      "Bengaluru",
+      "Delhi",
+      "Chennai",
+    ],
+
+    Ahmedabad: [
+      "Bengaluru",
+      "Delhi",
+      "Mumbai",
+      "Chennai",
+    ],
+
+    Jaipur: [
+      "Bengaluru",
+      "Delhi",
+      "Mumbai",
+      "Chennai",
+    ],
+
+    Goa: [
+      "Bengaluru",
+      "Delhi",
+      "Mumbai",
+      "Chennai",
+    ],
+
+    Delhi: [
+      "Bengaluru",
+      "Mumbai",
+      "Hyderabad",
+      "Chennai",
+      "Kolkata",
+      "Pune",
+      "Ahmedabad",
+      "Jaipur",
+      "Goa",
+    ],
+
+    Mumbai: [
+      "Bengaluru",
+      "Delhi",
+      "Hyderabad",
+      "Chennai",
+      "Kolkata",
+      "Ahmedabad",
+      "Jaipur",
+      "Goa",
+    ],
+
+    Hyderabad: [
+      "Bengaluru",
+      "Delhi",
+      "Mumbai",
+      "Chennai",
+    ],
+
+    Chennai: [
+      "Bengaluru",
+      "Delhi",
+      "Mumbai",
+      "Hyderabad",
+      "Kolkata",
+      "Pune",
+      "Ahmedabad",
+      "Jaipur",
+      "Goa",
+    ],
+
+    Kolkata: [
+      "Bengaluru",
+      "Delhi",
+      "Mumbai",
+      "Chennai",
+    ],
+  };
+
+  const flightFromOptions = Object.keys(
+    allowedFlightRoutes
+  ).map((city) => ({
+    value: city,
+    label: city,
+  }));
+
+  const flightToOptions = (
+    allowedFlightRoutes[from] || []
+  ).map((city) => ({
+    value: city,
+    label: city,
+  }));
+
+  const handleFromChange = (value: string) => {
+    setfrom(value);
+    setto("");
+  };
+
   if (loading) {
     return <Loader />;
   }
+
+  // Save recommendation feedback.
+  const handleRecommendationFeedback = async (
+    recommendation: any,
+    feedback: "HELPFUL" | "IRRELEVANT"
+  ) => {
+    if (!user?.email) {
+      alert("Please log in to give recommendation feedback.");
+      return;
+    }
+
+    const targetId = recommendation?.targetId;
+    const targetType = recommendation?.targetType;
+
+    if (!targetId || !targetType) {
+      alert("Recommendation information is missing.");
+      return;
+    }
+
+    const recommendationKey =
+      `${targetType}:${targetId}`;
+
+    try {
+      setFeedbackLoading(
+        `${recommendationKey}:${feedback}`
+      );
+
+      // Always resolve the latest user from the backend.
+      // This guarantees that the MongoDB user ID is used.
+      const fullUser = await getuserbyemail(user.email);
+
+      const userId =
+        fullUser?.id ||
+        fullUser?._id;
+
+      if (!userId) {
+        throw new Error(
+          "User ID was not returned by the backend."
+        );
+      }
+
+      console.log(
+        "Saving recommendation feedback:",
+        {
+          userId,
+          targetType,
+          targetId,
+          feedback,
+        }
+      );
+
+      await sendRecommendationFeedback(
+        userId,
+        targetType,
+        targetId,
+        feedback
+      );
+
+      console.log(
+        "Recommendation feedback saved successfully."
+      );
+
+      setFeedbackStatus((current) => ({
+        ...current,
+        [recommendationKey]: feedback,
+      }));
+
+      if (feedback === "IRRELEVANT") {
+        // Immediately remove an irrelevant recommendation.
+        setRecommendations((current) =>
+          current.filter(
+            (item) =>
+              !(
+                item.targetType === targetType &&
+                item.targetId === targetId
+              )
+          )
+        );
+      } else {
+        // Immediately show the helpful feedback on the card.
+        setRecommendations((current) =>
+          current.map((item) => {
+            if (
+              item.targetType !== targetType ||
+              item.targetId !== targetId
+            ) {
+              return item;
+            }
+
+            const existingReasons = Array.isArray(
+              item.reasons
+            )
+              ? item.reasons
+              : item.reason
+              ? [item.reason]
+              : [];
+
+            const helpfulReason =
+              "You previously found this recommendation helpful";
+
+            return {
+              ...item,
+              score: Number(item.score || 0) + 15,
+              reason: helpfulReason,
+              reasons: existingReasons.includes(helpfulReason)
+                ? existingReasons
+                : [...existingReasons, helpfulReason],
+            };
+          })
+        );
+      }
+    } catch (error: any) {
+      console.error(
+        "Recommendation feedback error:",
+        error
+      );
+
+      const message =
+        error?.response?.data?.message ||
+        error?.response?.data ||
+        error?.message ||
+        "Unable to save your feedback.";
+
+      alert(`Feedback failed: ${message}`);
+    } finally {
+      setFeedbackLoading(null);
+    }
+  };
 
   const handlesearch = async () => {
     if (bookingtype === "flights") {
@@ -230,6 +553,7 @@ function Home() {
         setsearchresult(results);
       } catch (error) {
         console.error("Flight search error:", error);
+
         alert("Unable to search flights. Please try again.");
       }
     } else if (bookingtype === "hotels") {
@@ -256,11 +580,30 @@ function Home() {
     return date.toLocaleString("en-US", options);
   };
 
-  const handlebooknow = (id: any) => {
+  const handlebooknow = (
+    id: any,
+    bookingDate?: string
+  ) => {
+    const selectedBookingDate =
+      bookingDate || date;
+
+    if (!selectedBookingDate) {
+      alert("Please select a booking date first.");
+      return;
+    }
+
     if (bookingtype === "flights") {
-      router.push(`/book-flight/${id}?travelers=${travelers}`);
+      router.push(
+        `/book-flight/${id}?travelers=${travelers}&date=${encodeURIComponent(
+          selectedBookingDate
+        )}`
+      );
     } else {
-      router.push(`/book-hotel/${id}`);
+      router.push(
+        `/book-hotel/${id}?date=${encodeURIComponent(
+          selectedBookingDate
+        )}`
+      );
     }
   };
 
@@ -339,10 +682,10 @@ function Home() {
             {bookingtype === "flights" && (
               <div className="col-span-1">
                 <SearchSelect
-                  options={cityOptions}
+                  options={flightFromOptions}
                   placeholder="From"
                   value={from}
-                  onChange={setfrom}
+                  onChange={handleFromChange}
                   icon={<MapPin className="text-gray-400" />}
                   subtitle="Enter city or airport"
                 />
@@ -352,9 +695,15 @@ function Home() {
             {/* TO */}
             <div className="col-span-1">
               <SearchSelect
-                options={cityOptions}
+                options={
+                  bookingtype === "flights"
+                    ? flightToOptions
+                    : cityOptions
+                }
                 placeholder={
-                  bookingtype === "flights" ? "To" : "City"
+                  bookingtype === "flights"
+                    ? "To"
+                    : "City"
                 }
                 value={to}
                 onChange={setto}
@@ -522,6 +871,255 @@ function Home() {
         {/* OTHER SECTIONS */}
         <div className="max-w-7xl mx-auto px-4">
 
+          {/* PERSONALIZED RECOMMENDATIONS */}
+          <section className="my-16">
+
+            <div className="mb-8">
+
+              <h2 className="text-2xl font-bold text-white">
+                Personalized For You
+              </h2>
+
+              <p className="text-white/80 mt-1">
+                Recommendations based on your travel history and preferences
+              </p>
+
+            </div>
+
+            {recommendationLoading ? (
+
+              <div className="bg-white rounded-xl shadow-lg p-8 text-center">
+
+                <p className="text-gray-600">
+                  Finding recommendations for you...
+                </p>
+
+              </div>
+
+            ) : recommendations.length > 0 ? (
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+                {recommendations.map((recommendation) => {
+
+                  const isFlight =
+                    recommendation.targetType === "FLIGHT";
+
+                  const recommendationKey =
+                    `${recommendation.targetType}:${recommendation.targetId}`;
+
+                  const helpfulKey =
+                    `${recommendationKey}:HELPFUL`;
+
+                  const irrelevantKey =
+                    `${recommendationKey}:IRRELEVANT`;
+
+                  const currentFeedback =
+                    feedbackStatus[recommendationKey];
+
+                  const whyReasons = Array.isArray(
+                    recommendation.reasons
+                  )
+                    ? recommendation.reasons
+                    : recommendation.reason
+                    ? [recommendation.reason]
+                    : [];
+
+                  return (
+                    <div
+                      key={recommendationKey}
+                      className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden"
+                    >
+
+                      <div className="p-5">
+
+                        <div className="flex items-start justify-between gap-3">
+
+                          <div>
+
+                            <span
+                              className={`inline-block text-xs font-semibold px-2 py-1 rounded-full ${
+                                isFlight
+                                  ? "bg-blue-100 text-blue-700"
+                                  : "bg-green-100 text-green-700"
+                              }`}
+                            >
+                              {isFlight ? "✈️ FLIGHT" : "🏨 HOTEL"}
+                            </span>
+
+                            <h3 className="text-lg font-bold text-gray-900 mt-3">
+                              {recommendation.title}
+                            </h3>
+
+                          </div>
+
+                          <div className="text-sm font-bold text-blue-600">
+                            {Math.round(
+                              Number(recommendation.score || 0)
+                            )}{" "}
+                            match
+                          </div>
+
+                        </div>
+
+                        {isFlight ? (
+                          <>
+                            <p className="text-gray-700 mt-3">
+                              {recommendation.from} →{" "}
+                              {recommendation.to}
+                            </p>
+
+                            <p className="text-sm text-gray-500 mt-1">
+                              Departure:{" "}
+                              {formatDate(
+                                recommendation.departureTime
+                              )}
+                            </p>
+
+                            <p className="text-xl font-bold text-gray-900 mt-3">
+                              ₹{recommendation.price}
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-gray-700 mt-3">
+                              📍 {recommendation.location}
+                            </p>
+
+                            <p className="text-xl font-bold text-gray-900 mt-3">
+                              ₹{recommendation.price}{" "}
+                              <span className="text-sm font-normal text-gray-500">
+                                / night
+                              </span>
+                            </p>
+                          </>
+                        )}
+
+                        {/* WHY THIS RECOMMENDATION */}
+                        <div className="mt-4 bg-blue-50 border border-blue-100 rounded-lg p-3">
+
+                          <p className="font-semibold text-blue-800 text-sm">
+                            💡 Why this recommendation?
+                          </p>
+
+                          <div className="mt-2 space-y-1">
+
+                            {whyReasons.map(
+                              (reason: string, index: number) => (
+                                <p
+                                  key={`${recommendationKey}-reason-${index}`}
+                                  className="text-sm text-blue-700"
+                                >
+                                  • {reason}
+                                </p>
+                              )
+                            )}
+
+                          </div>
+
+                        </div>
+
+                        <Button
+                          className="w-full mt-4"
+                          onClick={() =>
+                            handlebooknow(
+                              recommendation.targetId,
+                              isFlight
+                                ? recommendation.departureTime?.slice(0, 10) || date
+                                : date
+                            )
+                          }
+                        >
+                          {isFlight
+                            ? "View & Book Flight"
+                            : "View & Book Hotel"}
+                        </Button>
+
+                        {/* FEEDBACK LOOP */}
+                        <div className="mt-4">
+
+                          <p className="text-xs text-gray-500 mb-2">
+                            Help us improve your recommendations
+                          </p>
+
+                          <div className="grid grid-cols-2 gap-2">
+
+                            <Button
+                              variant={
+                                currentFeedback === "HELPFUL"
+                                  ? "default"
+                                  : "outline"
+                              }
+                              className="w-full text-sm"
+                              disabled={feedbackLoading !== null}
+                              onClick={() =>
+                                handleRecommendationFeedback(
+                                  recommendation,
+                                  "HELPFUL"
+                                )
+                              }
+                            >
+                              {feedbackLoading === helpfulKey
+                                ? "Saving..."
+                                : currentFeedback === "HELPFUL"
+                                ? "✓ Helpful"
+                                : "👍 Helpful"}
+                            </Button>
+
+                            <Button
+                              variant="outline"
+                              className="w-full text-sm"
+                              disabled={feedbackLoading !== null}
+                              onClick={() =>
+                                handleRecommendationFeedback(
+                                  recommendation,
+                                  "IRRELEVANT"
+                                )
+                              }
+                            >
+                              {feedbackLoading === irrelevantKey
+                                ? "Removing..."
+                                : "👎 Not relevant"}
+                            </Button>
+
+                          </div>
+
+                          {currentFeedback === "HELPFUL" && (
+                            <p className="text-xs text-green-600 mt-2">
+                              ✓ Your feedback was saved and will improve
+                              future recommendations.
+                            </p>
+                          )}
+
+                        </div>
+
+                      </div>
+
+                    </div>
+                  );
+                })}
+
+              </div>
+
+            ) : (
+
+              <div className="bg-white rounded-xl shadow-lg p-8 text-center">
+
+                <p className="text-gray-700 font-medium">
+                  No personalized recommendations available yet.
+                </p>
+
+                <p className="text-sm text-gray-500 mt-2">
+                  Book a flight or hotel and interact with recommendations
+                  to get more personalized suggestions.
+                </p>
+
+              </div>
+
+            )}
+
+          </section>
+
           {/* OFFERS */}
           <section className="my-16">
 
@@ -593,6 +1191,7 @@ function Home() {
 }
 
 /* OFFER CARD */
+
 const OfferCard = ({
   title,
   description,
@@ -628,6 +1227,7 @@ const OfferCard = ({
 };
 
 /* COLLECTION CARD */
+
 const CollectionCard = ({
   title,
   imageUrl,
@@ -667,6 +1267,7 @@ const CollectionCard = ({
 };
 
 /* DOWNLOAD APP */
+
 const DownloadApp = () => {
   return (
     <div className="bg-white p-6 rounded-lg shadow-md max-w-7xl mx-auto my-12">
@@ -718,6 +1319,7 @@ const DownloadApp = () => {
 };
 
 /* WONDER CARD */
+
 const WonderCard = ({
   title,
   imageUrl,
@@ -748,6 +1350,7 @@ const WonderCard = ({
 };
 
 /* NAV ITEM */
+
 function NavItem({
   icon,
   text,
@@ -774,6 +1377,7 @@ function NavItem({
 }
 
 /* SEARCH INPUT */
+
 function SearchInput({
   icon,
   placeholder,

@@ -799,12 +799,74 @@ export default function FlightStatusPage() {
             HEADER
         ===================================================== */}
 
-        <div style={{ marginBottom: "30px" }}>
+        <div
+          style={{
+            position: "relative",
+            marginBottom: "30px",
+          }}
+        >
+          {/* CLOSE BUTTON */}
+          <button
+            type="button"
+            onClick={() => {
+              const {
+                from,
+                to,
+                date,
+                travelers,
+              } = router.query;
+
+              // Return to the home page with the user's current
+              // search values so they do not have to enter them again.
+              router.push({
+                pathname: "/",
+                query: {
+                  ...(typeof from === "string" && from
+                    ? { from }
+                    : {}),
+                  ...(typeof to === "string" && to
+                    ? { to }
+                    : {}),
+                  ...(typeof date === "string" && date
+                    ? { date }
+                    : {}),
+                  ...(typeof travelers === "string" &&
+                  travelers
+                    ? { travelers }
+                    : {}),
+                },
+              });
+            }}
+            title="Close flight status"
+            aria-label="Close flight status"
+            style={{
+              position: "absolute",
+              top: "0",
+              right: "0",
+              width: "42px",
+              height: "42px",
+              borderRadius: "50%",
+              border: "1px solid #d1d5db",
+              background: "white",
+              color: "#111827",
+              fontSize: "24px",
+              lineHeight: "1",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+            }}
+          >
+            ×
+          </button>
+
           <h1
             style={{
               fontSize: "32px",
               fontWeight: 700,
               margin: 0,
+              paddingRight: "55px",
               color: "#111827",
             }}
           >
@@ -815,6 +877,7 @@ export default function FlightStatusPage() {
             style={{
               color: "#6b7280",
               marginTop: "8px",
+              paddingRight: "55px",
               fontSize: "16px",
             }}
           >

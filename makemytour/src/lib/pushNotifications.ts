@@ -1,69 +1,91 @@
 const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL ||
-  "http://localhost:8080";
+  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
 
-function urlBase64ToArrayBuffer(
-  base64String: string
-): ArrayBuffer {
-  const padding =
-    "=".repeat(
-      (4 - (base64String.length % 4)) % 4
-    );
+function urlBase64ToArrayBuffer(base64String: string): ArrayBuffer {
+  const padding = "=".repeat(
+    (4 - (base64String.length % 4)) % 4
+  );
 
-  const base64 =
-    (base64String + padding)
-      .replace(/-/g, "+")
-      .replace(/_/g, "/");
+  const base64 = (base64String + padding)
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
 
-  const rawData =
-    window.atob(base64);
+  const rawData = window.atob(base64);
+  const buffer = new ArrayBuffer(rawData.length);
+  const outputArray = new Uint8Array(buffer);
 
-  const buffer =
-    new ArrayBuffer(rawData.length);
-
-  const outputArray =
-    new Uint8Array(buffer);
-
-  for (
-    let i = 0;
-    i < rawData.length;
-    i++
-  ) {
-    outputArray[i] =
-      rawData.charCodeAt(i);
+  for (let i = 0; i < rawData.length; i++) {
+    outputArray[i] = rawData.charCodeAt(i);
   }
 
   return buffer;
 }
 
-export async function registerPushServiceWorker() {
-  if (!("serviceWorker" in navigator)) {
-    throw new Error(
-      "Service workers are not supported."
-    );
+/**
+ * Register the push service worker and WAIT until it is active.
+ *
+ * The previous version returned immediately after register().
+ * That caused:
+ *
+ * AbortError: Failed to execute 'subscribe' on 'PushManager':
+ * Subscription failed - no active Service Worker
+ *
+ * navigator.serviceWorker.ready guarantees that an active worker
+ * controls/owns the registration before pushManager.subscribe().
+ */
+export async function registerPushServiceWorker(): Promise<ServiceWorkerRegistration> {
+  if (typeof window === "undefined") {
+    throw new Error("Service workers are only available in the browser.");
   }
 
-  const registration =
-    await navigator.serviceWorker.register(
-      "/sw.js"
-    );
+  if (!("serviceWorker" in navigator)) {
+    throw new Error("Service workers are not supported.");
+  }
+
+  const registration = await navigator.serviceWorker.register(
+    "/sw.js",
+    { scope: "/" }
+  );
 
   console.log(
     "Push service worker registered:",
     registration.scope
   );
 
-  return registration;
+  // IMPORTANT: wait for the service worker to become active.
+  const activeRegistration =
+    await navigator.serviceWorker.ready;
+
+  console.log(
+    "Push service worker is active:",
+    activeRegistration.scope
+  );
+
+  return activeRegistration;
 }
 
 export async function subscribeToPush(
   vapidPublicKey: string
-) {
+): Promise<PushSubscription> {
+  if (!vapidPublicKey) {
+    throw new Error("VAPID public key is not configured.");
+  }
+
+  if (
+    typeof window === "undefined" ||
+    !("serviceWorker" in navigator) ||
+    !("PushManager" in window)
+  ) {
+    throw new Error(
+      "Push notifications are not supported by this browser."
+    );
+  }
+
+  // Register and WAIT for an active service worker.
   const registration =
     await registerPushServiceWorker();
 
-  let permission =
-    Notification.permission;
+  let permission = Notification.permission;
 
   if (permission !== "granted") {
     permission =
@@ -83,58 +105,45 @@ export async function subscribeToPush(
     subscription =
       await registration.pushManager.subscribe({
         userVisibleOnly: true,
-
         applicationServerKey:
-          urlBase64ToArrayBuffer(
-            vapidPublicKey
-          ),
+          urlBase64ToArrayBuffer(vapidPublicKey),
       });
   }
 
-  const json =
-    subscription.toJSON();
+  const json = subscription.toJSON();
 
-  const endpoint =
-    json.endpoint;
+  const endpoint = json.endpoint;
+  const p256dh = json.keys?.p256dh;
+  const auth = json.keys?.auth;
 
-  const p256dh =
-    json.keys?.p256dh;
-
-  const auth =
-    json.keys?.auth;
-
-  if (
-    !endpoint ||
-    !p256dh ||
-    !auth
-  ) {
+  if (!endpoint || !p256dh || !auth) {
     throw new Error(
       "Invalid push subscription."
     );
   }
 
-  const response =
-    await fetch(
-      `${BACKEND_URL}/push/subscribe`,
-      {
-        method: "POST",
-
-        headers: {
-          "Content-Type":
-            "application/json",
-        },
-
-        body: JSON.stringify({
-          endpoint,
-          p256dh,
-          auth,
-        }),
-      }
-    );
+  const response = await fetch(
+    `${BACKEND_URL}/push/subscribe`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        endpoint,
+        p256dh,
+        auth,
+      }),
+    }
+  );
 
   if (!response.ok) {
+    const errorText =
+      await response.text().catch(() => "");
+
     throw new Error(
-      "Failed to save push subscription."
+      errorText ||
+        "Failed to save push subscription."
     );
   }
 
@@ -145,15 +154,16 @@ export async function subscribeToPush(
   return subscription;
 }
 
-export async function unsubscribeFromPush() {
-  if (!("serviceWorker" in navigator)) {
+export async function unsubscribeFromPush(): Promise<void> {
+  if (
+    typeof window === "undefined" ||
+    !("serviceWorker" in navigator)
+  ) {
     return;
   }
 
   const registration =
-    await navigator.serviceWorker.getRegistration(
-      "/"
-    );
+    await navigator.serviceWorker.getRegistration("/");
 
   if (!registration) {
     return;
@@ -166,8 +176,7 @@ export async function unsubscribeFromPush() {
     return;
   }
 
-  const endpoint =
-    subscription.endpoint;
+  const endpoint = subscription.endpoint;
 
   await subscription.unsubscribe();
 

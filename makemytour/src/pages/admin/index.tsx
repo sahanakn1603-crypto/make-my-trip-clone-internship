@@ -446,6 +446,302 @@ function AddEditFlight({ flight }: { flight: Flight | null }) {
   );
 }
 
+
+interface ModerationReview {
+  id: string;
+  userId: string;
+  userName: string;
+  targetType: string;
+  targetId: string;
+  rating: number;
+  reviewText: string;
+  photoUrls?: string[];
+  helpfulCount?: number;
+  flagReason?: string;
+  flagged?: boolean;
+  status?: string;
+  createdAt?: string;
+}
+
+function ReviewModeration() {
+  const [reviews, setReviews] = useState<ModerationReview[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [actionId, setActionId] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+
+  const backendUrl =
+    process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+
+  const loadFlaggedReviews = async () => {
+    try {
+      setLoading(true);
+      setMessage("");
+
+      const response = await fetch(
+        `${backendUrl}/reviews/moderation/flagged`
+      );
+
+      if (!response.ok) {
+        throw new Error("Unable to load flagged reviews.");
+      }
+
+      const data = await response.json();
+      setReviews(Array.isArray(data) ? data : []);
+    } catch (error: any) {
+      console.error("Loading flagged reviews failed:", error);
+      setMessage(
+        error?.message || "Unable to load flagged reviews."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadFlaggedReviews();
+  }, []);
+
+  const approveReview = async (reviewId: string) => {
+    try {
+      setActionId(reviewId);
+      setMessage("");
+
+      const response = await fetch(
+        `${backendUrl}/reviews/moderation/${reviewId}/approve`,
+        {
+          method: "PUT",
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Unable to keep the review.");
+      }
+
+      setReviews((previous) =>
+        previous.filter((review) => review.id !== reviewId)
+      );
+      setMessage("Review kept successfully.");
+    } catch (error: any) {
+      console.error("Approving review failed:", error);
+      setMessage(
+        error?.message || "Unable to keep the review."
+      );
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const removeReview = async (reviewId: string) => {
+    try {
+      setActionId(reviewId);
+      setMessage("");
+
+      const response = await fetch(
+        `${backendUrl}/reviews/moderation/${reviewId}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Unable to remove the review.");
+      }
+
+      setReviews((previous) =>
+        previous.filter((review) => review.id !== reviewId)
+      );
+      setMessage("Review removed successfully.");
+    } catch (error: any) {
+      console.error("Removing review failed:", error);
+      setMessage(
+        error?.message || "Unable to remove the review."
+      );
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const formatDate = (value?: string) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString();
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h3 className="text-xl font-semibold">
+            Review Moderation
+          </h3>
+          <p className="text-sm text-gray-500">
+            Review reports and decide whether to keep or remove
+            reported reviews.
+          </p>
+        </div>
+
+        <Button
+          type="button"
+          variant="outline"
+          onClick={loadFlaggedReviews}
+          disabled={loading}
+        >
+          {loading ? "Loading..." : "Refresh"}
+        </Button>
+      </div>
+
+      {message && (
+        <div className="rounded-md border bg-gray-50 p-3 text-sm">
+          {message}
+        </div>
+      )}
+
+      {!loading && reviews.length === 0 && (
+        <div className="rounded-lg border border-dashed p-10 text-center">
+          <div className="text-4xl mb-3">✓</div>
+          <h4 className="font-semibold text-lg">
+            No reported reviews
+          </h4>
+          <p className="text-sm text-gray-500 mt-1">
+            There are currently no reviews waiting for moderation.
+          </p>
+        </div>
+      )}
+
+      <div className="space-y-4">
+        {reviews.map((review) => (
+          <Card key={review.id}>
+            <CardHeader>
+              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                <div>
+                  <CardTitle className="text-lg">
+                    {review.userName || "Unknown User"}
+                  </CardTitle>
+                  <CardDescription>
+                    {review.targetType === "HOTEL"
+                      ? "Hotel Review"
+                      : "Flight Review"}{" "}
+                    • ID: {review.targetId}
+                  </CardDescription>
+                </div>
+
+                <div className="rounded-full bg-red-100 px-3 py-1 text-sm font-medium text-red-700 w-fit">
+                  Reported
+                </div>
+              </div>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-3">
+                <div>
+                  <p className="text-xs text-gray-500">Rating</p>
+                  <p className="font-semibold">
+                    {"⭐".repeat(Math.max(0, Math.min(5, review.rating)))}{" "}
+                    <span className="text-gray-600">
+                      ({review.rating}/5)
+                    </span>
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-xs text-gray-500">User ID</p>
+                  <p className="font-medium break-all">
+                    {review.userId || "-"}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-xs text-gray-500">Reported Reason</p>
+                  <p className="font-medium">
+                    {review.flagReason || "No reason provided"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-lg bg-gray-50 border p-4">
+                <p className="text-xs text-gray-500 mb-1">
+                  Review
+                </p>
+                <p className="whitespace-pre-wrap">
+                  {review.reviewText || "No review text"}
+                </p>
+              </div>
+
+              {review.photoUrls && review.photoUrls.length > 0 && (
+                <div>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Photos: {review.photoUrls.length}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {review.photoUrls.map((photo, index) => {
+                      const cleanBackendUrl = backendUrl.endsWith("/")
+                        ? backendUrl.slice(0, -1)
+                        : backendUrl;
+
+                      const photoUrl =
+                        photo.startsWith("http://") ||
+                        photo.startsWith("https://")
+                          ? photo
+                          : `${cleanBackendUrl}${
+                              photo.startsWith("/") ? "" : "/"
+                            }${photo}`;
+
+                      return (
+                        <a
+                          key={`${photo}-${index}`}
+                          href={photoUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <img
+                            src={photoUrl}
+                            alt={`Review photo ${index + 1}`}
+                            className="h-24 w-24 rounded-lg object-cover border"
+                          />
+                        </a>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="text-xs text-gray-500">
+                {review.createdAt
+                  ? `Created: ${formatDate(review.createdAt)}`
+                  : ""}
+              </div>
+
+              <div className="flex flex-wrap gap-3 pt-2">
+                <Button
+                  type="button"
+                  onClick={() => approveReview(review.id)}
+                  disabled={actionId === review.id}
+                >
+                  {actionId === review.id
+                    ? "Processing..."
+                    : "✓ Keep Review"}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => removeReview(review.id)}
+                  disabled={actionId === review.id}
+                >
+                  {actionId === review.id
+                    ? "Processing..."
+                    : "Remove Review"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState("flights");
   const [selectedFlight, setSelectedFlight] = useState(null);
@@ -455,10 +751,11 @@ export default function AdminDashboard() {
     <div className="container mx-auto p-4 bg-white max-w-full">
       <h1 className="text-3xl font-bold mb-6 ">Admin Dashboard</h1>
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-3  text-black">
+        <TabsList className="grid w-full grid-cols-4 text-black">
           <TabsTrigger value="flights">Flights</TabsTrigger>
           <TabsTrigger value="hotels">Hotels</TabsTrigger>
           <TabsTrigger value="users">Users</TabsTrigger>
+          <TabsTrigger value="reviews">Reviews</TabsTrigger>
         </TabsList>
         <TabsContent value="flights">
           <Card>
@@ -500,6 +797,19 @@ export default function AdminDashboard() {
             </CardHeader>
             <CardContent>
               <UserSearch />
+            </CardContent>
+          </Card>
+        </TabsContent>
+        <TabsContent value="reviews">
+          <Card>
+            <CardHeader>
+              <CardTitle>Review Moderation</CardTitle>
+              <CardDescription>
+                Manage reviews reported by users.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ReviewModeration />
             </CardContent>
           </Card>
         </TabsContent>

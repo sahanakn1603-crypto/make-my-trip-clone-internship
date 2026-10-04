@@ -21,7 +21,7 @@ import axios from "axios";
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "next/router";
 import { clearUser, setUser } from "@/store";
-import { editprofile } from "@/api";
+import { editprofile, getuserbyemail } from "@/api";
 
 const BACKEND_URL = "http://localhost:8080";
 
@@ -58,21 +58,113 @@ const index = () => {
   const [refundResult, setRefundResult] = useState<any>(null);
   const [refundLoading, setRefundLoading] = useState(false);
   const [refundStatuses, setRefundStatuses] = useState<Record<string, any>>({});
+  const [mounted, setMounted] = useState(false);
+
+  const normalizeUser = (data: any) => {
+    if (!data) return null;
+
+    return {
+      ...data,
+      id: data.id ?? data._id ?? data.userId,
+      bookings: Array.isArray(data.bookings) ? data.bookings : [],
+    };
+  };
+
+  // Restore the logged-in user from localStorage, then refresh the complete
+  // user record from the backend so My Bookings is not lost after refresh.
+  useEffect(() => {
+    let cancelled = false;
+
+    const restoreUser = async () => {
+      if (typeof window === "undefined") return;
+
+      try {
+        const savedUser = localStorage.getItem("user");
+        if (!savedUser) {
+          setMounted(true);
+          return;
+        }
+
+        const saved = normalizeUser(JSON.parse(savedUser));
+
+        if (saved && !cancelled) {
+          dispatch(setUser(saved));
+          setUserData((previous) => ({
+            ...previous,
+            firstName: saved.firstName || "",
+            lastName: saved.lastName || "",
+            email: saved.email || "",
+            phoneNumber: saved.phoneNumber || "",
+            bookings: saved.bookings || [],
+          }));
+        }
+
+        // Login/signup responses may not contain the latest embedded bookings.
+        // Fetch the full user record using the logged-in email.
+        if (saved?.email) {
+          try {
+            const freshData = normalizeUser(await getuserbyemail(saved.email));
+
+            if (freshData && !cancelled) {
+              const mergedUser = {
+                ...saved,
+                ...freshData,
+                id: freshData.id ?? freshData._id ?? saved.id,
+                bookings: Array.isArray(freshData.bookings)
+                  ? freshData.bookings
+                  : saved.bookings || [],
+              };
+
+              dispatch(setUser(mergedUser));
+              localStorage.setItem("user", JSON.stringify(mergedUser));
+
+              setUserData((previous) => ({
+                ...previous,
+                firstName: mergedUser.firstName || "",
+                lastName: mergedUser.lastName || "",
+                email: mergedUser.email || "",
+                phoneNumber: mergedUser.phoneNumber || "",
+                bookings: mergedUser.bookings || [],
+              }));
+            }
+          } catch (error) {
+            console.log("Could not refresh user profile:", error);
+          }
+        }
+      } catch (error) {
+        console.error("Unable to restore logged-in user:", error);
+      } finally {
+        if (!cancelled) setMounted(true);
+      }
+    };
+
+    restoreUser();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dispatch]);
 
   useEffect(() => {
-    if (user) {
-      setUserData((previous) => ({
-        ...previous,
-        firstName: user.firstName || "",
-        lastName: user.lastName || "",
-        email: user.email || "",
-        phoneNumber: user.phoneNumber || "",
-      }));
-    }
+    if (!user) return;
+
+    const normalized = normalizeUser(user);
+
+    setUserData((previous) => ({
+      ...previous,
+      firstName: normalized.firstName || "",
+      lastName: normalized.lastName || "",
+      email: normalized.email || "",
+      phoneNumber: normalized.phoneNumber || "",
+      bookings: normalized.bookings || [],
+    }));
   }, [user]);
 
   const logout = () => {
     dispatch(clearUser());
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("user");
+    }
     router.push("/");
   };
 
@@ -85,7 +177,11 @@ const index = () => {
         userData.email,
         userData.phoneNumber
       );
-      dispatch(setUser(data));
+      const normalized = normalizeUser(data);
+      dispatch(setUser(normalized));
+      if (typeof window !== "undefined") {
+        localStorage.setItem("user", JSON.stringify(normalized));
+      }
       setIsEditing(false);
     } catch (error) {
       setUserData(editForm);
@@ -112,9 +208,9 @@ const index = () => {
   const openCancellation = async (booking: any) => {
     if (!booking?.bookingId || !user?.id) return;
 
-    // Always ask the backend for the latest cancellation state.
-    // This prevents a stale Redux/UI booking from showing the
-    // cancellation modal after it has already been cancelled.
+    // Before opening the cancellation modal, verify the booking is still
+    // cancellable on the backend. This prevents an old/stale Redux booking
+    // from showing the cancellation form after it was already cancelled.
     try {
       const response = await axios.get(
         `${BACKEND_URL}/cancellation/refund/${encodeURIComponent(
@@ -130,37 +226,30 @@ const index = () => {
           [booking.bookingId]: refund,
         }));
 
-        const updatedBookings = (user.bookings || []).map((item: any) =>
-          item.bookingId === booking.bookingId
-            ? {
-                ...item,
-                status: "CANCELLED",
-                cancellationReason:
-                  refund.cancellationReason ||
-                  item.cancellationReason ||
-                  "Cancellation requested",
-                refundAmount: refund.refundAmount,
-                refundStatus: refund.status,
-                cancelledAt: refund.cancelledAt,
-              }
-            : item
-        );
+        const updatedUser = {
+          ...user,
+          bookings: (user.bookings || []).map((item: any) =>
+            item.bookingId === booking.bookingId
+              ? {
+                  ...item,
+                  status: "CANCELLED",
+                  cancellationReason:
+                    refund.cancellationReason || item.cancellationReason,
+                  refundAmount: refund.refundAmount,
+                  refundStatus: refund.status,
+                  cancelledAt: refund.cancelledAt,
+                }
+              : item
+          ),
+        };
 
-        dispatch(
-          setUser({
-            ...user,
-            bookings: updatedBookings,
-          })
-        );
-
-        setRefundResult(refund);
-        setCancelBooking(null);
+        dispatch(setUser(updatedUser));
+        setRefundResult(null);
         return;
       }
     } catch (error) {
-      // If the status endpoint is temporarily unavailable, allow the
-      // normal cancellation flow to continue.
-      console.log("Latest cancellation status check failed:", error);
+      // If there is no refund record, continue and open the cancellation form.
+      console.log("No existing cancellation found; opening cancellation form.");
     }
 
     setCancelBooking(booking);
@@ -197,7 +286,6 @@ const index = () => {
 
       const refund = response.data;
       setRefundResult(refund);
-
       setRefundStatuses((previous) => ({
         ...previous,
         [cancelBooking.bookingId]: refund,
@@ -237,6 +325,7 @@ const index = () => {
     if (!user?.id || !booking?.bookingId) return;
 
     setRefundLoading(true);
+
     try {
       const response = await axios.get(
         `${BACKEND_URL}/cancellation/refund/${encodeURIComponent(
@@ -244,39 +333,41 @@ const index = () => {
         )}/${encodeURIComponent(booking.bookingId)}`
       );
 
-      if (response.data?.active && response.data?.refund) {
+      if (response.data?.active) {
         const refund = response.data.refund;
+
+        setRefundResult(refund);
 
         setRefundStatuses((previous) => ({
           ...previous,
           [booking.bookingId]: refund,
         }));
 
-        setRefundResult(refund);
+        // Persist the fetched status on this exact booking as well.
+        // This prevents another booking's status from changing this card.
+        const updatedUser = {
+          ...user,
+          bookings: (user.bookings || []).map((item: any) =>
+            item.bookingId === booking.bookingId
+              ? {
+                  ...item,
+                  refundStatus: refund.status,
+                  refundAmount: refund.refundAmount,
+                  cancelledAt: refund.cancelledAt,
+                }
+              : item
+          ),
+        };
 
-        // Keep Redux booking data synchronized with the backend.
-        const updatedBookings = (user.bookings || []).map((item: any) =>
-          item.bookingId === booking.bookingId
-            ? {
-                ...item,
-                status: "CANCELLED",
-                cancellationReason:
-                  refund.cancellationReason ||
-                  item.cancellationReason ||
-                  "Cancellation requested",
-                refundAmount: refund.refundAmount,
-                refundStatus: refund.status,
-                cancelledAt: refund.cancelledAt,
-              }
-            : item
-        );
+        dispatch(setUser(updatedUser));
+      } else {
+        setRefundStatuses((previous) => {
+          const next = { ...previous };
+          delete next[booking.bookingId];
+          return next;
+        });
 
-        dispatch(
-          setUser({
-            ...user,
-            bookings: updatedBookings,
-          })
-        );
+        setRefundResult(null);
       }
     } catch (error) {
       console.log("Refund status error:", error);
@@ -300,6 +391,77 @@ const index = () => {
       year: "numeric",
     });
   };
+
+  const getRefundStep = (status: string) => {
+    const normalized = String(status || "PENDING").toUpperCase();
+
+    if (normalized === "COMPLETED") return 3;
+    if (normalized === "PROCESSED") return 2;
+    return 1;
+  };
+
+  const RefundTracker = ({ status }: { status: string }) => {
+    const step = getRefundStep(status);
+
+    const steps = [
+      { label: "Pending", icon: Clock3 },
+      { label: "Processed", icon: RefreshCw },
+      { label: "Completed", icon: CheckCircle2 },
+    ];
+
+    return (
+      <div className="mt-4 bg-white rounded-xl border p-4">
+        <div className="flex items-center justify-between mb-3">
+          <p className="font-semibold text-gray-800">Refund Status Tracker</p>
+          <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-50 text-blue-700">
+            {String(status || "PENDING").toUpperCase()}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2">
+          {steps.map((item, index) => {
+            const currentStep = index + 1;
+            const Icon = item.icon;
+            const active = currentStep <= step;
+
+            return (
+              <div key={item.label} className="text-center">
+                <div
+                  className={`mx-auto w-9 h-9 rounded-full flex items-center justify-center ${
+                    active
+                      ? "bg-green-100 text-green-700"
+                      : "bg-gray-100 text-gray-400"
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                </div>
+                <p
+                  className={`text-xs mt-2 font-medium ${
+                    active ? "text-green-700" : "text-gray-400"
+                  }`}
+                >
+                  {item.label}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+
+        <p className="text-xs text-gray-500 mt-3">
+          Refunds are expected within 5 working days. Status updates are
+          processed automatically.
+        </p>
+      </div>
+    );
+  };
+
+  if (!mounted) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-gray-600">Loading profile...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 pt-8 px-4 pb-10">
@@ -459,16 +621,26 @@ const index = () => {
                 ) : (
                   user.bookings.map((booking: any, index: number) => {
                     const bookingRefund =
-                      refundStatuses[booking.bookingId] ||
-                      (refundResult?.bookingId === booking.bookingId
-                        ? refundResult
-                        : null);
+                      refundStatuses[booking.bookingId] || null;
 
+                    // A booking is treated as cancelled if either the
+                    // booking itself says CANCELLED or we already have a
+                    // refund record for this exact booking. This prevents
+                    // the Cancel Booking button from appearing again when
+                    // the backend has already cancelled the booking.
                     const cancelled =
                       isCancelled(booking) ||
-                      Boolean(
-                        bookingRefund?.bookingId === booking.bookingId
-                      );
+                      Boolean(bookingRefund?.bookingId === booking.bookingId);
+
+                    const displayedRefundStatus =
+                      bookingRefund?.status ||
+                      booking?.refundStatus ||
+                      "PENDING";
+
+                    const displayedRefundAmount =
+                      bookingRefund?.refundAmount ??
+                      booking?.refundAmount ??
+                      0;
 
                     return (
                       <div
@@ -560,18 +732,26 @@ const index = () => {
                               </button>
                             </div>
 
-                            {(bookingRefund || booking?.refundAmount !== undefined) && (
+                            {(
+                              refundStatuses[booking.bookingId] ||
+                              booking?.refundAmount !== undefined
+                            ) && (
+                              <>
+                              <RefundTracker
+                                status={displayedRefundStatus}
+                              />
+
                               <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
                                 <div className="bg-white rounded-lg p-3">
                                   <p className="text-xs text-gray-500">Refund Amount</p>
                                   <p className="font-bold text-lg text-green-700">
-                                    ₹ {Number(bookingRefund?.refundAmount ?? booking?.refundAmount ?? 0).toLocaleString("en-IN")}
+                                    ₹ {Number(displayedRefundAmount).toLocaleString("en-IN")}
                                   </p>
                                 </div>
                                 <div className="bg-white rounded-lg p-3">
                                   <p className="text-xs text-gray-500">Status</p>
                                   <p className="font-semibold text-orange-600">
-                                    {bookingRefund?.status || booking?.refundStatus || "PENDING"}
+                                    {displayedRefundStatus}
                                   </p>
                                 </div>
                                 <div className="bg-white rounded-lg p-3">
@@ -581,6 +761,7 @@ const index = () => {
                                   </p>
                                 </div>
                               </div>
+                              </>
                             )}
                           </div>
                         )}

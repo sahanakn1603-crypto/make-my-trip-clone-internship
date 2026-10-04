@@ -14,72 +14,27 @@ import { signup, login } from "../api";
 import { setUser } from "@/store";
 import { useDispatch } from "react-redux";
 
-const SignupDialog = ({ trigger, onSuccess }: any) => {
-  const [isSignup, setIsSignup] = useState(true);
+interface SignupDialogProps {
+  trigger: React.ReactNode;
+  onSuccess?: (data: any) => void;
+  initialMode?: "login" | "signup";
+}
+
+const SignupDialog = ({
+  trigger,
+  onSuccess,
+  initialMode = "signup",
+}: SignupDialogProps) => {
+  const [isSignup, setIsSignup] = useState(initialMode === "signup");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [open, setopem] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   const dispatch = useDispatch();
-
-  const completeLogin = (data: any) => {
-    // Save in both Redux and localStorage immediately.
-    dispatch(setUser(data));
-
-    if (typeof window !== "undefined") {
-      localStorage.setItem("user", JSON.stringify(data));
-    }
-
-    if (onSuccess) {
-      onSuccess(data);
-    }
-
-    setopem(false);
-    clearform();
-  };
-
-  const handleAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (isSignup) {
-      try {
-        const signin = await signup(
-          firstName,
-          lastName,
-          email,
-          phoneNumber,
-          password
-        );
-
-        completeLogin(signin);
-      } catch (error: any) {
-        console.error(error);
-
-        const message =
-          error?.response?.data?.message ||
-          error?.response?.data ||
-          "Signup failed. Please try again.";
-
-        alert(message);
-      }
-    } else {
-      try {
-        const data = await login(email, password);
-        completeLogin(data);
-      } catch (error: any) {
-        console.error(error);
-
-        const message =
-          error?.response?.data?.message ||
-          error?.response?.data ||
-          "Login failed. Please check your email and password.";
-
-        alert(message);
-      }
-    }
-  };
 
   const clearform = () => {
     setFirstName("");
@@ -87,6 +42,75 @@ const SignupDialog = ({ trigger, onSuccess }: any) => {
     setEmail("");
     setPassword("");
     setPhoneNumber("");
+    setError("");
+  };
+
+  const completeLogin = (data: any) => {
+    // Keep the existing user object, but normalize the MongoDB _id
+    // to id as well because the booking page uses currentUser.id.
+    const normalizedUser = {
+      ...data,
+      id: data?.id ?? data?._id ?? data?.userId,
+    };
+
+    dispatch(setUser(normalizedUser));
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem("user", JSON.stringify(normalizedUser));
+    }
+
+    if (onSuccess) {
+      onSuccess(normalizedUser);
+    }
+
+    setopem(false);
+    clearform();
+  };
+
+  const handlePhoneChange = (value: string) => {
+    // Digits only, maximum 10 digits.
+    const digitsOnly = value.replace(/\D/g, "").slice(0, 10);
+    setPhoneNumber(digitsOnly);
+    setError("");
+  };
+
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+
+    if (isSignup && !/^\d{10}$/.test(phoneNumber)) {
+      setError("Please enter exactly 10 digits.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const data = isSignup
+        ? await signup(
+            firstName,
+            lastName,
+            email.trim(),
+            phoneNumber,
+            password
+          )
+        : await login(email.trim(), password);
+
+      completeLogin(data);
+    } catch (error: any) {
+      console.error("Authentication error:", error);
+
+      const message =
+        error?.response?.data?.message ||
+        error?.response?.data ||
+        (isSignup
+          ? "Signup failed. Please try again."
+          : "Login failed. Please check your email and password.");
+
+      setError(String(message));
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -114,7 +138,10 @@ const SignupDialog = ({ trigger, onSuccess }: any) => {
                 <Input
                   id="firstName"
                   value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
+                  onChange={(e) => {
+                    setFirstName(e.target.value);
+                    setError("");
+                  }}
                   required
                 />
               </div>
@@ -124,7 +151,10 @@ const SignupDialog = ({ trigger, onSuccess }: any) => {
                 <Input
                   id="lastName"
                   value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
+                  onChange={(e) => {
+                    setLastName(e.target.value);
+                    setError("");
+                  }}
                   required
                 />
               </div>
@@ -136,8 +166,12 @@ const SignupDialog = ({ trigger, onSuccess }: any) => {
             <Input
               id="email"
               type="email"
+              autoComplete="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setError("");
+              }}
               required
             />
           </div>
@@ -147,8 +181,12 @@ const SignupDialog = ({ trigger, onSuccess }: any) => {
             <Input
               id="password"
               type="password"
+              autoComplete={isSignup ? "new-password" : "current-password"}
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setError("");
+              }}
               required
             />
           </div>
@@ -159,10 +197,24 @@ const SignupDialog = ({ trigger, onSuccess }: any) => {
               <Input
                 id="phoneNumber"
                 type="tel"
+                inputMode="numeric"
+                autoComplete="tel"
+                maxLength={10}
+                pattern="[0-9]{10}"
                 value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value)}
+                onChange={(e) => handlePhoneChange(e.target.value)}
+                placeholder="10-digit mobile number"
                 required
               />
+              <p className="text-xs text-gray-500">
+                Enter exactly 10 digits.
+              </p>
+            </div>
+          )}
+
+          {error && (
+            <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-600">
+              {error}
             </div>
           )}
 
@@ -170,8 +222,13 @@ const SignupDialog = ({ trigger, onSuccess }: any) => {
             type="submit"
             className="w-full bg-blue-600 text-white"
             variant="outline"
+            disabled={loading}
           >
-            {isSignup ? "Sign Up" : "Login"}
+            {loading
+              ? "Please wait..."
+              : isSignup
+              ? "Sign Up"
+              : "Login"}
           </Button>
         </form>
 
@@ -180,9 +237,13 @@ const SignupDialog = ({ trigger, onSuccess }: any) => {
             <>
               Already have an account?{" "}
               <Button
+                type="button"
                 variant="link"
                 className="p-0 text-blue-600"
-                onClick={() => setIsSignup(false)}
+                onClick={() => {
+                  setError("");
+                  setIsSignup(false);
+                }}
               >
                 Login
               </Button>
@@ -191,9 +252,13 @@ const SignupDialog = ({ trigger, onSuccess }: any) => {
             <>
               Don't have an account?{" "}
               <Button
+                type="button"
                 variant="link"
                 className="p-0 text-blue-600"
-                onClick={() => setIsSignup(true)}
+                onClick={() => {
+                  setError("");
+                  setIsSignup(true);
+                }}
               >
                 Sign Up
               </Button>
