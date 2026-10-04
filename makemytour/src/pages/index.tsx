@@ -497,8 +497,8 @@ function Home() {
 
       try {
         const generateResponse = await fetch(
-          `http://localhost:8080/flight-data/generate?date=${date}`,
-          {
+        `https://make-my-trip-clone-internship.onrender.com/flight-data/generate?date=${date}`,
+        {
             method: "POST",
           }
         );

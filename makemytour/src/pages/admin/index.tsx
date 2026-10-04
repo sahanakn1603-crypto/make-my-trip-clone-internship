@@ -470,8 +470,8 @@ function ReviewModeration() {
   const [message, setMessage] = useState("");
 
   const backendUrl =
-    process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-
+  process.env.NEXT_PUBLIC_API_URL ||
+  "https://make-my-trip-clone-internship.onrender.com";
   const loadFlaggedReviews = async () => {
     try {
       setLoading(true);

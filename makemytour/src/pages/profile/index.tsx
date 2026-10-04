@@ -23,7 +23,8 @@ import { useRouter } from "next/router";
 import { clearUser, setUser } from "@/store";
 import { editprofile, getuserbyemail } from "@/api";
 
-const BACKEND_URL = "http://localhost:8080";
+const BACKEND_URL =
+  "https://make-my-trip-clone-internship.onrender.com";
 
 const CANCELLATION_REASONS = [
   "Change of plans",

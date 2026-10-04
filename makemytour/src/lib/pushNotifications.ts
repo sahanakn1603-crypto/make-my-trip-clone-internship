@@ -1,5 +1,6 @@
 const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
+  process.env.NEXT_PUBLIC_BACKEND_URL ||
+  "https://make-my-trip-clone-internship.onrender.com";
 
 function urlBase64ToArrayBuffer(base64String: string): ArrayBuffer {
   const padding = "=".repeat(

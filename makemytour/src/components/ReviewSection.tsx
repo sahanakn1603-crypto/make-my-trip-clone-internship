@@ -101,9 +101,8 @@ const ReviewSection: React.FC<ReviewSectionProps> = ({
 
   // Backend URL used for uploaded review photos.
   const backendUrl =
-    process.env.NEXT_PUBLIC_API_URL ||
-    "http://localhost:8080";
-
+  process.env.NEXT_PUBLIC_API_URL ||
+  "https://make-my-trip-clone-internship.onrender.com";
   // Opens a review photo inside the current page.
   const [selectedReviewPhoto, setSelectedReviewPhoto] =
     useState<string | null>(null);

@@ -138,7 +138,9 @@ const [seatError, setSeatError] = useState("");
   }, [user]);
 
   const currentUser = authenticatedUser || user;
-  const backendUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  const backendUrl =
+  process.env.NEXT_PUBLIC_API_URL ||
+  "https://make-my-trip-clone-internship.onrender.com";
 
   // Restore the saved preferred seat from the logged-in user.
   useEffect(() => {
@@ -676,12 +678,11 @@ const savePreferredSeat = async (seatNumber: string) => {
     setPreferredSeatMessage("");
 
     const response = await fetch(
-      `http://localhost:8080/user/preferred-seat?userId=${encodeURIComponent(
-        currentUser.id
-      )}&preferredSeat=${encodeURIComponent(normalizedSeat)}`,
-      { method: "PUT" }
-    );
-
+  `${backendUrl}/user/preferred-seat?userId=${encodeURIComponent(
+    currentUser.id
+  )}&preferredSeat=${encodeURIComponent(normalizedSeat)}`,
+  { method: "PUT" }
+);
     if (!response.ok) {
       let message = "Unable to save preferred seat.";
 
