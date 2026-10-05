@@ -95,7 +95,8 @@ const [seatError, setSeatError] = useState("");
   const [freezeLoading, setFreezeLoading] = useState(false);
   const [freezeError, setFreezeError] = useState("");
   const [freezeSecondsLeft, setFreezeSecondsLeft] = useState(0);
-  const freezeCountdownRef = useRef<HTMLSpanElement | null>(null);
+const [freezeClientExpiresAt, setFreezeClientExpiresAt] = useState<number | null>(null);
+  
   // Prevent repeatedly auto-selecting the preferred seat after the user manually changes it.
   const preferredAutoAppliedRef = useRef(false);
 
@@ -441,20 +442,26 @@ useEffect(() => {
 // Keep the price-freeze countdown in sync with the backend expiry time.
 // Only the countdown text is updated every second; React state is not updated
 // every second, which prevents the large booking page from blinking/repainting.
+// Price Freeze countdown
+// Updates React state every second so every Fare Summary section
+// displays the same live countdown.
 useEffect(() => {
   if (!priceFreeze?.expiresAt) {
     setFreezeSecondsLeft(0);
-    if (freezeCountdownRef.current) {
-      freezeCountdownRef.current.textContent = "00:00";
-    }
+    setFreezeClientExpiresAt(null);
     return;
   }
 
-  const expiresAt = new Date(
-  priceFreeze.expiresAt.endsWith("Z")
-    ? priceFreeze.expiresAt
-    : `${priceFreeze.expiresAt}Z`
-).getTime();
+  const backendExpiresAt = new Date(
+    priceFreeze.expiresAt.endsWith("Z")
+      ? priceFreeze.expiresAt
+      : `${priceFreeze.expiresAt}Z`
+  ).getTime();
+
+  // For a newly created freeze, use the browser time so the countdown
+  // starts at exactly 30:00 instead of being affected by server/browser
+  // clock differences.
+  const expiresAt = freezeClientExpiresAt ?? backendExpiresAt;
 
   const updateCountdown = () => {
     const remaining = Math.max(
@@ -462,27 +469,23 @@ useEffect(() => {
       Math.ceil((expiresAt - Date.now()) / 1000)
     );
 
-    if (freezeCountdownRef.current) {
-      freezeCountdownRef.current.textContent = formatFreezeTime(remaining);
-    }
-
-    // Set React state only once when the freeze starts and once when it expires.
-    if (remaining > 0 && freezeSecondsLeft <= 0) {
-      setFreezeSecondsLeft(remaining);
-    }
+    setFreezeSecondsLeft(remaining);
 
     if (remaining <= 0) {
       setFreezeSecondsLeft(0);
+      setFreezeClientExpiresAt(null);
       setPriceFreeze(null);
     }
   };
 
   updateCountdown();
+
   const timer = window.setInterval(updateCountdown, 1000);
 
-  return () => window.clearInterval(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [priceFreeze?.expiresAt]);
+  return () => {
+    window.clearInterval(timer);
+  };
+}, [priceFreeze?.expiresAt, freezeClientExpiresAt]);
 
 // ADD THIS
 useEffect(() => {
@@ -586,46 +589,44 @@ if (loading) {
     return date.toLocaleString("en-US", options);
   };
 
-  const handleFreezePrice = async () => {
-    if (!currentUser?.id || !flight?.id) {
-      setFreezeError("Please log in before freezing the price.");
-      return;
-    }
+const handleFreezePrice = async () => {
+  if (!currentUser?.id || !flight?.id) {
+    setFreezeError("Please log in before freezing the price.");
+    return;
+  }
 
-    setFreezeLoading(true);
-    setFreezeError("");
+  setFreezeLoading(true);
+  setFreezeError("");
 
-    try {
-      const freeze = await freezeFlightPrice(currentUser.id, flight.id);
-      setPriceFreeze(freeze);
+  try {
+    const freeze = await freezeFlightPrice(
+      currentUser.id,
+      flight.id
+    );
 
-      if (freeze?.expiresAt) {
-        const expiresAt = new Date(
-          freeze.expiresAt.endsWith("Z")
-            ? freeze.expiresAt
-            : `${freeze.expiresAt}Z`
-        ).getTime();
+    setPriceFreeze(freeze);
 
-        const remaining = Math.max(
-          0,
-          Math.ceil((expiresAt - Date.now()) / 1000)
-        );
+    // Start a fresh 30-minute client-side countdown.
+    // This prevents server/browser clock differences such as 30:03.
+    const clientExpiresAt = Date.now() + 30 * 60 * 1000;
 
-        setFreezeSecondsLeft(remaining);
-      }
+    setFreezeClientExpiresAt(clientExpiresAt);
+    setFreezeSecondsLeft(30 * 60);
 
-    } catch (error: any) {
-      console.error("Error freezing flight price:", error);
-      const message =
-        error?.response?.data?.message ||
-        error?.response?.data ||
-        error?.message ||
-        "Unable to freeze the flight price. Please try again.";
-      setFreezeError(String(message));
-    } finally {
-      setFreezeLoading(false);
-    }
-  };
+  } catch (error: any) {
+    console.error("Error freezing flight price:", error);
+
+    const message =
+      error?.response?.data?.message ||
+      error?.response?.data ||
+      error?.message ||
+      "Unable to freeze the flight price. Please try again.";
+
+    setFreezeError(String(message));
+  } finally {
+    setFreezeLoading(false);
+  }
+};
 
   function formatFreezeTime(seconds: number): string {
     const safeSeconds = Math.max(0, seconds);
@@ -2171,12 +2172,9 @@ const BookingContent = () => (
                         </p>
                       </div>
 
-                      <span
-                        ref={freezeCountdownRef}
-                        className="text-sm font-bold text-green-800 whitespace-nowrap"
-                      >
-                        {formatFreezeTime(freezeSecondsLeft)}
-                      </span>
+                      <span className="text-sm font-bold text-green-800 whitespace-nowrap">
+  {formatFreezeTime(freezeSecondsLeft)}
+</span>
                     </div>
                   ) : (
                     <div className="flex items-center justify-between gap-3">
