@@ -411,8 +411,15 @@ useEffect(() => {
 
       if (cancelled) return;
 
-      if (response?.active && response?.freeze) {
-        setPriceFreeze(response.freeze);
+      const activeFreeze =
+        response?.active && response?.freeze
+          ? response.freeze
+          : response?.expiresAt && response?.status === "ACTIVE"
+          ? response
+          : null;
+
+      if (activeFreeze) {
+        setPriceFreeze(activeFreeze);
       } else {
         setPriceFreeze(null);
         setFreezeSecondsLeft(0);
@@ -443,7 +450,11 @@ useEffect(() => {
     return;
   }
 
-  const expiresAt = new Date(priceFreeze.expiresAt).getTime();
+  const expiresAt = new Date(
+  priceFreeze.expiresAt.endsWith("Z")
+    ? priceFreeze.expiresAt
+    : `${priceFreeze.expiresAt}Z`
+).getTime();
 
   const updateCountdown = () => {
     const remaining = Math.max(
@@ -587,6 +598,21 @@ if (loading) {
     try {
       const freeze = await freezeFlightPrice(currentUser.id, flight.id);
       setPriceFreeze(freeze);
+
+      if (freeze?.expiresAt) {
+        const expiresAt = new Date(
+          freeze.expiresAt.endsWith("Z")
+            ? freeze.expiresAt
+            : `${freeze.expiresAt}Z`
+        ).getTime();
+
+        const remaining = Math.max(
+          0,
+          Math.ceil((expiresAt - Date.now()) / 1000)
+        );
+
+        setFreezeSecondsLeft(remaining);
+      }
 
     } catch (error: any) {
       console.error("Error freezing flight price:", error);
@@ -994,7 +1020,7 @@ const handleSeatClick = (seat: FlightSeat) => {
                       y={y + 4}
                       textAnchor="end"
                       fontSize="11"
-                      fill="#6b7280"
+                                            fill="#6b7280"
                     >
                       ₹{Math.round(value).toLocaleString()}
                     </text>
@@ -1583,7 +1609,6 @@ const BookingContent = () => (
 
   </div>
 </div>
-
             {/* Selected Seats */}
             <div className="mt-4 p-3 rounded-lg bg-blue-50 border border-blue-100">
               <div className="flex justify-between items-center">
@@ -1655,6 +1680,7 @@ const BookingContent = () => (
                       );
                     })}
                   </div>
+
                   <p className="text-xs text-gray-500 mt-2">
                     This saves the selected seat to your account for future bookings.
                   </p>
@@ -1690,10 +1716,15 @@ const BookingContent = () => (
       className="w-full mt-4"
       onClick={() => {
         setBookingError("");
+
         if (selectedSeats.length === quantity) {
           setPaymentOpen(true);
         } else {
-          setSeatError(`Please select exactly ${quantity} seat${quantity > 1 ? "s" : ""}.`);
+          setSeatError(
+            `Please select exactly ${quantity} seat${
+              quantity > 1 ? "s" : ""
+            }.`
+          );
         }
       }}
       disabled={selectedSeats.length !== quantity || bookingLoading}
@@ -1721,6 +1752,7 @@ const BookingContent = () => (
           <div className="rounded-xl border bg-gray-50 p-4">
             <div className="flex justify-between text-sm text-gray-600">
               <span>Flight</span>
+
               <span className="font-medium text-gray-900">
                 {flight?.flightName}
               </span>
@@ -1728,6 +1760,7 @@ const BookingContent = () => (
 
             <div className="flex justify-between text-sm text-gray-600 mt-2">
               <span>Selected seats</span>
+
               <span className="font-medium text-gray-900">
                 {selectedSeats.join(", ")}
               </span>
@@ -1735,7 +1768,10 @@ const BookingContent = () => (
 
             <div className="flex justify-between text-lg font-bold mt-3 pt-3 border-t">
               <span>Total Amount</span>
-              <span>₹ {grandTotal.toLocaleString()}</span>
+
+              <span>
+                ₹ {grandTotal.toLocaleString()}
+              </span>
             </div>
           </div>
 
@@ -1748,15 +1784,18 @@ const BookingContent = () => (
                   <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center border">
                     <CreditCard className="w-5 h-5 text-blue-600" />
                   </div>
+
                   <div>
                     <div className="font-semibold text-gray-900">
                       UPI / Card
                     </div>
+
                     <div className="text-sm text-gray-500">
                       Pay securely
                     </div>
                   </div>
                 </div>
+
                 <div className="w-5 h-5 rounded-full border-2 border-blue-600 flex items-center justify-center">
                   <div className="w-2.5 h-2.5 rounded-full bg-blue-600" />
                 </div>
@@ -1785,12 +1824,15 @@ const BookingContent = () => (
     </Dialog>
   </>
 );
+
   return (
     <div className="min-h-screen bg-[#f4f7fa]">
       <div className="max-w-7xl mx-auto px-4 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
           {/* Main Content */}
           <div className="lg:col-span-2 space-y-6">
+
             {/* Flight Details */}
             <div className="bg-white rounded-xl shadow-sm p-6">
               <div className="flex flex-wrap justify-between items-start gap-4 mb-6">
@@ -1798,23 +1840,37 @@ const BookingContent = () => (
                   <div className="flex items-center flex-wrap gap-4 mb-2">
                     <h2 className="text-lg font-bold flex items-center">
                       <span>{flight?.from}</span>
+
                       <ArrowRight className="w-5 h-5 mx-2" />
+
                       <span>{flight?.to}</span>
                     </h2>
+
                     <span className="bg-green-100 text-green-600 text-xs px-3 py-1 rounded-full font-medium">
                       CANCELLATION FEES APPLY
                     </span>
                   </div>
+
                   <div className="flex items-center text-sm text-gray-600">
                     <Calendar className="w-4 h-4 mr-2" />
-                    <span>{formatDate(flight.departureTime)}</span>
+
+                    <span>
+                      {formatDate(flight.departureTime)}
+                    </span>
+
                     <span className="mx-2">•</span>
+
                     <Clock className="w-4 h-4 mr-2" />
-                    <span>Non Stop - {flightDetails.duration}</span>
+
+                    <span>
+                      Non Stop - {flightDetails.duration}
+                    </span>
                   </div>
                 </div>
+
                 <button className="text-blue-600 text-sm font-medium hover:text-blue-700 flex items-center">
                   <Info className="w-4 h-4 mr-1" />
+
                   View Fare Rules
                 </button>
               </div>
@@ -1823,17 +1879,25 @@ const BookingContent = () => (
                 <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
                   <Plane className="w-6 h-6 text-blue-600" />
                 </div>
+
                 <div>
-                  <div className="font-semibold">{flight.flightName}</div>
+                  <div className="font-semibold">
+                    {flight.flightName}
+                  </div>
+
                   <div className="text-sm text-gray-600">
                     {flightDetails.flightNo} • {flightDetails.aircraft}
                   </div>
                 </div>
+
                 <div className="ml-auto text-sm">
                   <span className="px-3 py-1 bg-blue-50 text-blue-600 rounded-full">
                     Economy
                   </span>
-                  <span className="ml-2 text-gray-600">MMTSPECIAL</span>
+
+                  <span className="ml-2 text-gray-600">
+                    MMTSPECIAL
+                  </span>
                 </div>
               </div>
 
@@ -1842,28 +1906,38 @@ const BookingContent = () => (
                   <div className="text-2xl font-bold">
                     {formatDate(flight.departureTime)}
                   </div>
+
                   <div className="text-sm text-gray-600 mt-1 flex items-start">
                     <MapPin className="w-4 h-4 mr-1 flex-shrink-0 mt-0.5" />
+
                     {flight.from} International Airport, Terminal T2
                   </div>
                 </div>
+
                 <div className="text-center flex-shrink-0">
                   <div className="text-sm text-gray-600 mb-1">
                     {flightDetails.duration}
                   </div>
+
                   <div className="w-32 h-0.5 bg-gray-300 relative my-2">
                     <div className="absolute -top-2 right-0 w-4 h-4 rounded-full bg-gray-300 flex items-center justify-center">
                       <Plane className="w-3 h-3 text-gray-600" />
                     </div>
                   </div>
-                  <div className="text-xs text-gray-500">Non-stop</div>
+
+                  <div className="text-xs text-gray-500">
+                    Non-stop
+                  </div>
                 </div>
+
                 <div className="text-right">
                   <div className="text-2xl font-bold">
                     {formatDate(flight.arrivalTime)}
                   </div>
+
                   <div className="text-sm text-gray-600 mt-1 flex items-start justify-end">
                     <MapPin className="w-4 h-4 mr-1 flex-shrink-0 mt-0.5" />
+
                     {flight.to} International Airport, Terminal T3
                   </div>
                 </div>
@@ -1872,11 +1946,18 @@ const BookingContent = () => (
               <div className="flex flex-wrap gap-6 mt-6 text-sm text-gray-600">
                 <div className="flex items-center">
                   <Luggage className="w-5 h-5 mr-2 text-gray-500" />
-                  <span>Cabin Baggage: {flightDetails.cabinBaggage}</span>
+
+                  <span>
+                    Cabin Baggage: {flightDetails.cabinBaggage}
+                  </span>
                 </div>
+
                 <div className="flex items-center">
                   <Luggage className="w-5 h-5 mr-2 text-gray-500" />
-                  <span>Check-in Baggage: {flightDetails.checkInBaggage}</span>
+
+                  <span>
+                    Check-in Baggage: {flightDetails.checkInBaggage}
+                  </span>
                 </div>
               </div>
             </div>
@@ -1889,23 +1970,34 @@ const BookingContent = () => (
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-lg font-bold flex items-center">
                   <AlertCircle className="w-5 h-5 mr-2 text-orange-500" />
+
                   Cancellation & Date Change Policy
                 </h2>
+
                 <button className="text-blue-600 text-sm font-medium hover:text-blue-700">
                   View Policy
                 </button>
               </div>
+
               <div className="bg-gray-50 p-6 rounded-xl">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center space-x-3">
                     <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
                       <Plane className="w-5 h-5 text-blue-600" />
                     </div>
-                    <span className="font-semibold">BLR-DEL</span>
+
+                    <span className="font-semibold">
+                      BLR-DEL
+                    </span>
                   </div>
-                  <div className="font-bold text-lg">₹ 4,300</div>
+
+                  <div className="font-bold text-lg">
+                    ₹ 4,300
+                  </div>
                 </div>
+
                 <div className="h-2.5 bg-gradient-to-r from-green-500 via-yellow-500 to-red-500 rounded-full"></div>
+
                 <div className="flex justify-between mt-2 text-xs text-gray-600">
                   <span>Now</span>
                   <span>16 Jan, 15:55</span>
@@ -1919,12 +2011,15 @@ const BookingContent = () => (
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-lg font-bold flex items-center">
                   <Gift className="w-5 h-5 mr-2 text-red-500" />
+
                   Book a Flight & unlock these offers
                 </h2>
+
                 <span className="bg-red-100 text-red-600 text-xs px-3 py-1 rounded-full font-medium">
                   Flyer Exclusive Deal
                 </span>
               </div>
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {hotels.map((hotel, index) => (
                   <div
@@ -1937,28 +2032,38 @@ const BookingContent = () => (
                         alt={hotel.name}
                         className="w-full h-48 object-cover"
                       />
+
                       <div className="absolute top-3 right-3 bg-white px-2 py-1 rounded-full text-xs font-medium">
                         Best Seller
                       </div>
                     </div>
+
                     <div className="p-4">
                       <h3 className="font-semibold text-lg mb-1">
                         {hotel.name}
                       </h3>
+
                       <div className="flex items-center text-sm text-gray-600 mb-2">
                         <MapPin className="w-4 h-4 mr-1" />
+
                         {hotel.location}
                       </div>
+
                       <div className="flex items-center justify-between">
                         <div className="flex items-center text-yellow-400">
                           {[...Array(hotel.rating)].map((_, i) => (
-                            <Star key={i} className="w-4 h-4 fill-current" />
+                            <Star
+                              key={i}
+                              className="w-4 h-4 fill-current"
+                            />
                           ))}
                         </div>
+
                         <div className="text-right">
                           <div className="text-xs text-gray-500">
                             Starting from
                           </div>
+
                           <div className="font-bold text-lg">
                             ₹ {hotel.price.toLocaleString()}
                           </div>
@@ -1974,143 +2079,207 @@ const BookingContent = () => (
           {/* Fare Summary */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-xl shadow-sm p-6 sticky top-24">
+
               <h2 className="text-lg font-bold mb-6 flex items-center">
                 <CreditCard className="w-5 h-5 mr-2 text-gray-600" />
+
                 Fare Summary
               </h2>
+
               <div className="space-y-2">
-            <div className="flex justify-between items-center">
-              <span className="text-gray-600">Base Fare</span>
-              <span className="font-medium">
-                {priceLoading
-                  ? "Updating..."
-                  : `₹ ${basePrice.toLocaleString()}`}
-              </span>
-            </div>
 
-            {peakAdjustment > 0 && (
-              <div className="flex justify-between items-center text-orange-600">
-                <span>Peak Travel Adjustment</span>
-                <span>+ ₹ {Math.round(peakAdjustment).toLocaleString()}</span>
-              </div>
-            )}
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">
+                    Base Fare
+                  </span>
 
-            {holidayAdjustment > 0 && (
-              <div className="flex justify-between items-center text-orange-600">
-                <span>Holiday Adjustment</span>
-                <span>+ ₹ {Math.round(holidayAdjustment).toLocaleString()}</span>
-              </div>
-            )}
-
-            {demandAdjustment > 0 && (
-              <div className="flex justify-between items-center text-orange-600">
-                <span>Demand Adjustment</span>
-                <span>+ ₹ {Math.round(demandAdjustment).toLocaleString()}</span>
-              </div>
-            )}
-
-            <div className="flex justify-between items-center">
-              <span className="text-gray-600">
-                {isPriceFrozen ? "Frozen Flight Price" : "Current Flight Price"}
-              </span>
-              <span className={`font-medium ${isPriceFrozen ? "text-green-700" : ""}`}>
-                {priceLoading
-                  ? "Updating..."
-                  : `₹ ${currentFlightPrice.toLocaleString()}`}
-              </span>
-            </div>
-
-            <div
-              className={`mt-3 rounded-lg border p-3 ${
-                isPriceFrozen
-                  ? "border-green-200 bg-green-50"
-                  : "border-blue-200 bg-blue-50"
-              }`}
-            >
-              {isPriceFrozen ? (
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-green-800">
-                      🔒 Price Frozen
-                    </p>
-                    <p className="text-xs text-green-700 mt-1">
-                      ₹ {Number(priceFreeze.lockedPrice).toLocaleString()} is locked for this booking.
-                    </p>
-                  </div>
-                  <span
-                    ref={freezeCountdownRef}
-                    className="text-sm font-bold text-green-800 whitespace-nowrap"
-                  >
-                    {formatFreezeTime(freezeSecondsLeft)}
+                  <span className="font-medium">
+                    {priceLoading
+                      ? "Updating..."
+                      : `₹ ${basePrice.toLocaleString()}`}
                   </span>
                 </div>
-              ) : (
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-blue-800">
-                      🔒 Protect this price
-                    </p>
-                    <p className="text-xs text-blue-700 mt-1">
-                      Freeze the current dynamic price for 30 minutes.
-                    </p>
+
+                {peakAdjustment > 0 && (
+                  <div className="flex justify-between items-center text-orange-600">
+                    <span>Peak Travel Adjustment</span>
+
+                    <span>
+                      + ₹ {Math.round(peakAdjustment).toLocaleString()}
+                    </span>
                   </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={handleFreezePrice}
-                    disabled={freezeLoading || priceLoading || !currentUser?.id}
-                    className="whitespace-nowrap border-blue-300 text-blue-700 hover:bg-blue-100"
-                  >
-                    {freezeLoading ? "Freezing..." : "Freeze Price"}
-                  </Button>
-                </div>
-              )}
-              {freezeError && !isPriceFrozen && (
-                <p className="text-xs text-red-600 mt-2">{freezeError}</p>
-              )}
-            </div>
+                )}
+
+                {holidayAdjustment > 0 && (
+                  <div className="flex justify-between items-center text-orange-600">
+                    <span>Holiday Adjustment</span>
+
+                    <span>
+                      + ₹ {Math.round(holidayAdjustment).toLocaleString()}
+                    </span>
+                  </div>
+                )}
+
+                {demandAdjustment > 0 && (
+                  <div className="flex justify-between items-center text-orange-600">
+                    <span>Demand Adjustment</span>
+
+                    <span>
+                      + ₹ {Math.round(demandAdjustment).toLocaleString()}
+                    </span>
+                  </div>
+                )}
+
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Taxes and Surcharges</span>
+                  <span className="text-gray-600">
+                    {isPriceFrozen
+                      ? "Frozen Flight Price"
+                      : "Current Flight Price"}
+                  </span>
+
+                  <span
+                    className={`font-medium ${
+                      isPriceFrozen ? "text-green-700" : ""
+                    }`}
+                  >
+                    {priceLoading
+                      ? "Updating..."
+                      : `₹ ${currentFlightPrice.toLocaleString()}`}
+                  </span>
+                </div>
+
+                <div
+                  className={`mt-3 rounded-lg border p-3 ${
+                    isPriceFrozen
+                      ? "border-green-200 bg-green-50"
+                      : "border-blue-200 bg-blue-50"
+                  }`}
+                >
+                  {isPriceFrozen ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-green-800">
+                          🔒 Price Frozen
+                        </p>
+
+                        <p className="text-xs text-green-700 mt-1">
+                          ₹{" "}
+                          {Number(
+                            priceFreeze.lockedPrice
+                          ).toLocaleString()}{" "}
+                          is locked for this booking.
+                        </p>
+                      </div>
+
+                      <span
+                        ref={freezeCountdownRef}
+                        className="text-sm font-bold text-green-800 whitespace-nowrap"
+                      >
+                        {formatFreezeTime(freezeSecondsLeft)}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-blue-800">
+                          🔒 Protect this price
+                        </p>
+
+                        <p className="text-xs text-blue-700 mt-1">
+                          Freeze the current dynamic price for 30 minutes.
+                        </p>
+                      </div>
+
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={handleFreezePrice}
+                        disabled={
+                          freezeLoading ||
+                          priceLoading ||
+                          !currentUser?.id
+                        }
+                        className="whitespace-nowrap border-blue-300 text-blue-700 hover:bg-blue-100"
+                      >
+                        {freezeLoading
+                          ? "Freezing..."
+                          : "Freeze Price"}
+                      </Button>
+                    </div>
+                  )}
+
+                  {freezeError && !isPriceFrozen && (
+                    <p className="text-xs text-red-600 mt-2">
+                      {freezeError}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">
+                    Taxes and Surcharges
+                  </span>
+
                   <span className="font-medium">
                     ₹ {totalTaxes.toLocaleString()}
                   </span>
                 </div>
+
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Other Services</span>
+                  <span className="text-gray-600">
+                    Other Services
+                  </span>
+
                   <span className="font-medium">
                     ₹ {totalOtherServices.toLocaleString()}
                   </span>
                 </div>
+
                 <div className="flex justify-between items-center text-green-600">
-                  <span className="font-medium">Discounts</span>
+                  <span className="font-medium">
+                    Discounts
+                  </span>
+
                   <span className="font-medium">
                     - ₹ {Math.abs(totalDiscounts).toLocaleString()}
                   </span>
                 </div>
+
                 <div className="border-t pt-2 mt-2">
                   <div className="flex justify-between items-center">
-                    <span className="font-bold text-lg">Total Amount</span>
+                    <span className="font-bold text-lg">
+                      Total Amount
+                    </span>
+
                     <span className="font-bold text-lg">
                       ₹ {grandTotal.toLocaleString()}
                     </span>
                   </div>
                 </div>
               </div>
+
               <Dialog open={open} onOpenChange={setopem}>
                 <DialogTrigger asChild>
                   <Button className="w-full bg-red-600 text-white">
                     Book Now
                   </Button>
                 </DialogTrigger>
+
                 {currentUser ? (
                   BookingContent()
                 ) : (
                   <DialogContent className="bg-white">
                     <DialogHeader>
-                      <DialogTitle>Login Required</DialogTitle>
+                      <DialogTitle>
+                        Login Required
+                      </DialogTitle>
                     </DialogHeader>
-                    <p>Please log in to continue with your booking.</p>
+
+                    <p>
+                      Please log in to continue with your booking.
+                    </p>
+
                     <SignupDialog
                       initialMode="login"
                       onSuccess={(loggedInUser: any) => {
@@ -2141,13 +2310,16 @@ const BookingContent = () => (
                   </DialogContent>
                 )}
               </Dialog>
+
               {/* Promo Codes */}
               <div className="mt-8">
                 <div className="bg-[#FFF8E7] p-6 rounded-xl">
                   <h3 className="font-bold mb-4 flex items-center">
                     <Gift className="w-5 h-5 mr-2 text-yellow-600" />
+
                     PROMO CODES
                   </h3>
+
                   <div className="relative mb-4">
                     <input
                       type="text"
@@ -2155,6 +2327,7 @@ const BookingContent = () => (
                       className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-colors"
                     />
                   </div>
+
                   {promoOffers.map((offer, index) => (
                     <div
                       key={index}
@@ -2166,13 +2339,16 @@ const BookingContent = () => (
                           name="promo"
                           className="mt-1.5 h-4 w-4 text-red-600 focus:ring-red-500"
                         />
+
                         <div>
                           <div className="font-semibold text-red-600">
                             {offer.code}
                           </div>
+
                           <p className="text-sm text-gray-600 mt-1">
                             {offer.description}
                           </p>
+
                           <button className="text-blue-600 text-sm font-medium mt-2 hover:text-blue-700">
                             Terms & Conditions
                           </button>
@@ -2182,6 +2358,7 @@ const BookingContent = () => (
                   ))}
                 </div>
               </div>
+
             </div>
           </div>
         </div>
