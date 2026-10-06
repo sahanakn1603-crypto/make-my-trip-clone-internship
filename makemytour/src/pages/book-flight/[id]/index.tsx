@@ -826,59 +826,88 @@ const handleSeatClick = (seat: FlightSeat) => {
     });
   }, 0);
 };
-  const handlebooking = async (e: React.FormEvent) => {
-    e.preventDefault();
+ const handlebooking = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setBookingError("");
+
+  if (!currentUser?.id) {
+    setBookingError(
+      "Your login session could not be found. Please log in again."
+    );
+    return;
+  }
+
+  if (!flight?.id) {
+    setBookingError(
+      "Flight information could not be found. Please go back and try again."
+    );
+    return;
+  }
+
+  if (selectedSeats.length !== quantity) {
+    setBookingError(
+      `Please select exactly ${quantity} seat${
+        quantity > 1 ? "s" : ""
+      }.`
+    );
+    return;
+  }
+
+  setBookingLoading(true);
+
+  try {
+    console.log("BOOKING SELECTED SEATS:", selectedSeats);
+
+    const data = await handleflightbooking(
+      currentUser.id,
+      flight.id,
+      quantity,
+      grandTotal,
+      "",
+      selectedSeats
+    );
+
+    const updateuser = {
+      ...currentUser,
+      bookings: [...(currentUser?.bookings || []), data],
+    };
+
+    dispatch(setUser(updateuser));
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem("user", JSON.stringify(updateuser));
+    }
+
+    setPaymentOpen(false);
+    setopem(false);
+    setQuantity(1);
+    setSelectedSeats([]);
     setBookingError("");
 
-    if (!currentUser?.id) {
-      setBookingError("Your login session could not be found. Please log in again.");
-      return;
+    router.push("/profile");
+  } catch (error: any) {
+    console.error("Flight booking failed:", error);
+
+    let message = "Booking failed. Please try again.";
+
+    if (error?.response?.data?.message) {
+      message = String(error.response.data.message);
+    } else if (typeof error?.response?.data === "string") {
+      message = error.response.data;
+    } else if (error?.response?.data) {
+      message =
+        error.response.data.error ||
+        error.response.data.detail ||
+        JSON.stringify(error.response.data);
+    } else if (error?.message) {
+      message = String(error.message);
     }
 
-    if (selectedSeats.length !== quantity) {
-      setBookingError(`Please select exactly ${quantity} seat${quantity > 1 ? "s" : ""}.`);
-      return;
-    }
-
-    setBookingLoading(true);
-
-    try {
-      const data = await handleflightbooking(
-  currentUser.id,
-  flight?.id,
-  quantity,
-  grandTotal,
-  "",
-  selectedSeats
-);
-      const updateuser = {
-        ...currentUser,
-        bookings: [...(currentUser?.bookings || []), data],
-      };
-
-      dispatch(setUser(updateuser));
-
-      if (typeof window !== "undefined") {
-        localStorage.setItem("user", JSON.stringify(updateuser));
-      }
-
-      setPaymentOpen(false);
-      setopem(false);
-      setQuantity(1);
-      setSelectedSeats([]);
-      router.push("/profile");
-    } catch (error: any) {
-      console.error("Flight booking failed:", error);
-      const message =
-        error?.response?.data?.message ||
-        error?.response?.data ||
-        error?.message ||
-        "Booking failed. Please try again.";
-      setBookingError(String(message));
-    } finally {
-      setBookingLoading(false);
-    }
-  };
+    setBookingError(message);
+  } finally {
+    setBookingLoading(false);
+  }
+};
   const historyValues = priceHistory
     .map((item) => Number(item.dynamicPrice))
     .filter((value) => Number.isFinite(value));
