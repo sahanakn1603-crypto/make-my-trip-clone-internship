@@ -37,7 +37,7 @@ function Home() {
   const [to, setto] = useState("");
   const [date, setdate] = useState("");
   const [today, settoday] = useState("");
-  const [travelers, settravelers] = useState(1);
+ const [travelers, settravelers] = useState<string>("1");
   const [searchresults, setsearchresult] = useState<any[]>([]);
   const [hotel, sethotel] = useState<any[]>([]);
   const [loading, setloading] = useState(true);
@@ -484,87 +484,109 @@ function Home() {
   };
 
   const handlesearch = async () => {
-    if (bookingtype === "flights") {
-      if (!from || !to) {
-        alert("Please select From and To cities.");
-        return;
-      }
+  if (bookingtype === "flights") {
 
-      if (!date) {
-        alert("Please select a travel date.");
-        return;
-      }
+    if (!from || !to) {
+      alert("Please select From and To cities.");
+      return;
+    }
 
-      try {
-        const generateResponse = await fetch(
+    if (from === to) {
+      alert("From and To cities cannot be the same.");
+      return;
+    }
+
+    if (!date) {
+      alert("Please select a travel date.");
+      return;
+    }
+
+    const travelerCount = Number(travelers);
+
+    if (
+      travelers.trim() === "" ||
+      !Number.isInteger(travelerCount) ||
+      travelerCount < 1 ||
+      travelerCount > 31
+    ) {
+      alert("Please enter number of travelers between 1 and 31.");
+      return;
+    }
+
+    try {
+      const generateResponse = await fetch(
         `https://make-my-trip-clone-internship.onrender.com/flight-data/generate?date=${date}`,
         {
-            method: "POST",
-          }
-        );
-
-        if (!generateResponse.ok) {
-          throw new Error(
-            "Could not generate flights for the selected date."
-          );
+          method: "POST",
         }
+      );
 
-        const response = await getflight();
-
-        setflight(response);
-
-        const normalizeCity = (city: string) =>
-          city
-            .trim()
-            .toLowerCase()
-            .replace("bangalore", "bengaluru");
-
-        const results = response.filter(
-          (FLIGHT: any, index: number, allFlights: any[]) => {
-            const routeMatches =
-              normalizeCity(FLIGHT.from) === normalizeCity(from) &&
-              normalizeCity(FLIGHT.to) === normalizeCity(to);
-
-            if (!routeMatches) {
-              return false;
-            }
-
-            const dateMatches =
-              FLIGHT.departureTime?.slice(0, 10) === date;
-
-            if (!dateMatches) {
-              return false;
-            }
-
-            const duplicateIndex = allFlights.findIndex(
-              (otherFlight: any) =>
-                normalizeCity(otherFlight.from) ===
-                  normalizeCity(FLIGHT.from) &&
-                normalizeCity(otherFlight.to) ===
-                  normalizeCity(FLIGHT.to) &&
-                otherFlight.flightName === FLIGHT.flightName &&
-                otherFlight.departureTime === FLIGHT.departureTime
-            );
-
-            return index === duplicateIndex;
-          }
+      if (!generateResponse.ok) {
+        throw new Error(
+          "Could not generate flights for the selected date."
         );
-
-        setsearchresult(results);
-      } catch (error) {
-        console.error("Flight search error:", error);
-
-        alert("Unable to search flights. Please try again.");
       }
-    } else if (bookingtype === "hotels") {
-      const results = hotel.filter(
-        (hotel) =>
-          hotel.location?.toLowerCase() === to.toLowerCase()
+
+      const response = await getflight();
+
+      setflight(response);
+
+      const normalizeCity = (city: string) =>
+        city
+          .trim()
+          .toLowerCase()
+          .replace("bangalore", "bengaluru");
+
+      const results = response.filter(
+        (FLIGHT: any, index: number, allFlights: any[]) => {
+
+          const routeMatches =
+            normalizeCity(FLIGHT.from) === normalizeCity(from) &&
+            normalizeCity(FLIGHT.to) === normalizeCity(to);
+
+          if (!routeMatches) {
+            return false;
+          }
+
+          const dateMatches =
+            FLIGHT.departureTime?.slice(0, 10) === date;
+
+          if (!dateMatches) {
+            return false;
+          }
+
+          const duplicateIndex = allFlights.findIndex(
+            (otherFlight: any) =>
+              normalizeCity(otherFlight.from) ===
+                normalizeCity(FLIGHT.from) &&
+              normalizeCity(otherFlight.to) ===
+                normalizeCity(FLIGHT.to) &&
+              otherFlight.flightName === FLIGHT.flightName &&
+              otherFlight.departureTime === FLIGHT.departureTime
+          );
+
+          return index === duplicateIndex;
+        }
       );
 
       setsearchresult(results);
+
+    } catch (error) {
+      console.error("Flight search error:", error);
+
+      alert("Unable to search flights. Please try again.");
     }
-  };
+
+  } else if (bookingtype === "hotels") {
+
+    const results = hotel.filter(
+      (hotel) =>
+        hotel.location?.toLowerCase() === to.toLowerCase()
+    );
+
+    setsearchresult(results);
+  }
+};
 
   const formatDate = (dateString: string): string => {
     const options: Intl.DateTimeFormatOptions = {
@@ -732,22 +754,43 @@ function Home() {
             </div>
 
             {/* TRAVELERS */}
-            <div className="col-span-1">
-              <SearchInput
-                icon={<Users className="text-gray-400" />}
-                placeholder="Travelers"
-                value={travelers.toString()}
-                onChange={(
-                  e: React.ChangeEvent<HTMLInputElement>
-                ) =>
-                  settravelers(
-                    parseInt(e.target.value) || 1
-                  )
-                }
-                subtitle="Number of travelers"
-                type="number"
-              />
-            </div>
+           {/* TRAVELERS */}
+<div className="col-span-1">
+  <SearchInput
+    icon={<Users className="text-gray-400" />}
+    placeholder="Travelers"
+    value={travelers}
+    onChange={(
+      e: React.ChangeEvent<HTMLInputElement>
+    ) => {
+      const value = e.target.value;
+
+      // Allow the user to completely erase the field
+      if (value === "") {
+        settravelers("");
+        return;
+      }
+
+      // Allow only numbers
+      if (!/^\d+$/.test(value)) {
+        return;
+      }
+
+      const numberValue = Number(value);
+
+      // Maximum 31 travelers
+      if (numberValue <= 31) {
+        settravelers(value);
+      }
+    }}
+    subtitle="1 - 31 travelers"
+    type="number"
+    min="1"
+    max="31"
+    step="1"
+    inputMode="numeric"
+  />
+</div>
 
             {/* SEARCH BUTTON */}
             <Button
@@ -1386,6 +1429,9 @@ function SearchInput({
   subtitle,
   type = "text",
   min,
+  max,
+  step,
+  inputMode,
 }: any) {
   return (
     <div className="border rounded-lg p-3 hover:border-blue-500 cursor-pointer h-full">
@@ -1401,13 +1447,16 @@ function SearchInput({
           </div>
 
           <input
-            type={type}
-            value={value}
-            min={min}
-            onChange={onChange}
-            className="font-semibold w-full bg-transparent outline-none"
-            placeholder={placeholder}
-          />
+  type={type}
+  value={value}
+  min={min}
+  max={max}
+  step={step}
+  inputMode={inputMode}
+  onChange={onChange}
+  className="font-semibold w-full bg-transparent outline-none"
+  placeholder={placeholder}
+/>
 
           <div className="text-xs text-gray-400 truncate">
             {subtitle}
