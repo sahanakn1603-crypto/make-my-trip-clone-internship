@@ -844,12 +844,13 @@ const handleSeatClick = (seat: FlightSeat) => {
 
     try {
       const data = await handleflightbooking(
-        currentUser.id,
-        flight?.id,
-        quantity,
-        grandTotal
-      );
-
+  currentUser.id,
+  flight?.id,
+  quantity,
+  grandTotal,
+  "",
+  selectedSeats
+);
       const updateuser = {
         ...currentUser,
         bookings: [...(currentUser?.bookings || []), data],

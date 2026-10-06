@@ -231,16 +231,24 @@ export const handleflightbooking = async (
   flightId,
   seats,
   price,
-  date = ""
+  date = "",
+  selectedSeats = []
 ) => {
   try {
+    const seatList = Array.isArray(selectedSeats)
+      ? selectedSeats.join(",")
+      : String(selectedSeats || "");
+
     const url =
       `${BACKEND_URL}/booking/flight` +
       `?userId=${encodeURIComponent(userId)}` +
       `&flightId=${encodeURIComponent(flightId)}` +
       `&seats=${encodeURIComponent(seats)}` +
       `&price=${encodeURIComponent(price)}` +
-      `&date=${encodeURIComponent(date)}`;
+      `&date=${encodeURIComponent(date)}` +
+      `&selectedSeats=${encodeURIComponent(seatList)}`;
+
+    console.log("BOOKING SELECTED SEATS:", seatList);
 
     const res = await axios.post(url);
 
@@ -250,36 +258,6 @@ export const handleflightbooking = async (
     throw error;
   }
 };
-
-
-export const handlehotelbooking = async (
-  userId,
-  hotelId,
-  rooms,
-  price,
-  roomType = "STANDARD",
-  date = ""
-) => {
-  try {
-    const url =
-      `${BACKEND_URL}/booking/hotel` +
-      `?userId=${encodeURIComponent(userId)}` +
-      `&hotelId=${encodeURIComponent(hotelId)}` +
-      `&rooms=${encodeURIComponent(rooms)}` +
-      `&price=${encodeURIComponent(price)}` +
-      `&roomType=${encodeURIComponent(roomType)}` +
-      `&date=${encodeURIComponent(date)}`;
-
-    const res = await axios.post(url);
-
-    return res.data;
-  } catch (error) {
-    console.log("Error booking hotel:", error);
-    throw error;
-  }
-};
-
-
 // =====================================================
 // FLIGHT SEATS
 // =====================================================

@@ -11,12 +11,23 @@ import com.makemytrip.makemytrip.repositories.FlightRepository;
 import com.makemytrip.makemytrip.repositories.HotelRepository;
 import com.makemytrip.makemytrip.repositories.PriceFreezeRepository;
 
+import org.bson.Document;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 
 @Service
 public class BookingService {
@@ -36,6 +47,9 @@ public class BookingService {
     @Autowired
     private PricingService pricingService;
 
+    @Autowired
+    private MongoTemplate mongoTemplate;
+
 
     // =========================================================
     // FLIGHT BOOKING
@@ -46,7 +60,8 @@ public class BookingService {
             String flightId,
             int seats,
             double price,
-            String date) {
+            String date,
+            String selectedSeats) {
 
         // -----------------------------------------------------
         // VALIDATION
@@ -63,6 +78,21 @@ public class BookingService {
         if (seats <= 0) {
             throw new RuntimeException(
                     "Number of seats must be greater than zero"
+            );
+        }
+
+
+        // -----------------------------------------------------
+        // VALIDATE SELECTED PHYSICAL SEATS
+        // -----------------------------------------------------
+
+        List<String> requestedSeatNumbers =
+                parseSelectedSeats(selectedSeats);
+
+        if (requestedSeatNumbers.size() != seats) {
+            throw new RuntimeException(
+                    "Please select exactly " + seats + " seat"
+                            + (seats > 1 ? "s" : "")
             );
         }
 
@@ -103,37 +133,50 @@ public class BookingService {
         LocalDate bookingDate;
 
         if (date == null || date.isBlank()) {
+
             if (flight.getDepartureTime() == null ||
                     flight.getDepartureTime().isBlank()) {
+
                 throw new RuntimeException(
                         "Please select an updated travel date"
                 );
             }
 
             try {
+
                 bookingDate = LocalDate.parse(
                         flight.getDepartureTime().substring(0, 10)
                 );
+
             } catch (Exception e) {
+
                 throw new RuntimeException(
                         "Invalid flight travel date"
                 );
             }
+
         } else {
+
             try {
+
                 bookingDate = LocalDate.parse(date);
+
             } catch (Exception e) {
+
                 throw new RuntimeException(
                         "Invalid travel date. Please select an updated date"
                 );
             }
         }
 
+
         if (bookingDate.isBefore(LocalDate.now())) {
+
             throw new RuntimeException(
                     "This date has already passed. Please select an updated date"
             );
         }
+
 
         if (flight.getDepartureTime() != null &&
                 !flight.getDepartureTime().isBlank()) {
@@ -142,9 +185,10 @@ public class BookingService {
                     flight.getDepartureTime().substring(0, 10);
 
             if (!flightDate.equals(bookingDate.toString())) {
+
                 throw new RuntimeException(
-                        "The selected date does not match this flight. " +
-                        "Please select the correct travel date"
+                        "The selected date does not match this flight. "
+                                + "Please select the correct travel date"
                 );
             }
         }
@@ -203,7 +247,7 @@ public class BookingService {
                 );
 
                 System.out.println(
-                        "🔒 PRICE FREEZE USED"
+                        "PRICE FREEZE USED"
                 );
 
                 System.out.println(
@@ -245,7 +289,7 @@ public class BookingService {
                                 .getDynamicPrice();
 
                 System.out.println(
-                        "⏰ Price freeze expired. "
+                        "Price freeze expired. "
                                 + "Using current dynamic price: ₹"
                                 + bookingPricePerSeat
                 );
@@ -263,7 +307,7 @@ public class BookingService {
                             .getDynamicPrice();
 
             System.out.println(
-                    "💰 Dynamic price used for booking: ₹"
+                    "Dynamic price used for booking: ₹"
                             + bookingPricePerSeat
             );
         }
@@ -275,6 +319,86 @@ public class BookingService {
 
         double serverCalculatedTotal =
                 bookingPricePerSeat * seats;
+
+
+        // =====================================================
+        // ATOMICALLY BOOK SELECTED PHYSICAL SEATS
+        // =====================================================
+
+        String seatCollection =
+                findSeatCollectionName(flightId);
+
+        if (seatCollection == null) {
+
+            throw new RuntimeException(
+                    "Seat availability data was not found for this flight"
+            );
+        }
+
+
+        List<String> lockedSeats =
+                new ArrayList<>();
+
+
+        try {
+
+            for (String seatNumber : requestedSeatNumbers) {
+
+                Query seatQuery =
+                        new Query(
+                                Criteria.where("flightId")
+                                        .is(flightId)
+                                        .and("seatNumber")
+                                        .is(seatNumber)
+                                        .and("status")
+                                        .is("AVAILABLE")
+                        );
+
+
+                Update seatUpdate =
+                        new Update()
+                                .set("status", "BOOKED");
+
+
+                Document bookedSeat =
+                        mongoTemplate.findAndModify(
+                                seatQuery,
+                                seatUpdate,
+                                FindAndModifyOptions
+                                        .options()
+                                        .returnNew(true),
+                                Document.class,
+                                seatCollection
+                        );
+
+
+                if (bookedSeat == null) {
+
+                    throw new RuntimeException(
+                            "Seat " + seatNumber
+                                    + " is no longer available. "
+                                    + "Please select another seat."
+                    );
+                }
+
+
+                lockedSeats.add(seatNumber);
+            }
+
+
+        } catch (RuntimeException bookingSeatError) {
+
+            // Roll back seats already locked by this request
+            // if another requested seat became unavailable.
+
+            releaseLockedSeats(
+                    flightId,
+                    lockedSeats,
+                    seatCollection
+            );
+
+            throw bookingSeatError;
+        }
 
 
         // =====================================================
@@ -292,46 +416,59 @@ public class BookingService {
         // CREATE BOOKING
         // =====================================================
 
-        Booking booking = new Booking();
-
-        booking.setType("Flight");
-
-        booking.setBookingId(flightId);
+        Booking booking =
+                new Booking();
 
 
-        // Store exactly the date selected by the user.
-        booking.setDate(bookingDate.toString());
+        booking.setType(
+                "Flight"
+        );
 
 
-        booking.setQuantity(seats);
+        booking.setBookingId(
+                flightId
+        );
 
-        /*
-         * IMPORTANT:
-         *
-         * "price" is the final amount shown to the user,
-         * including the fare, taxes, services, discounts
-         * and selected seat upgrades.
-         *
-         * The dynamic pricing engine still calculates
-         * the server-side fare above, but the booking record
-         * must store the actual final checkout amount.
-         */
+
+        // Store the selected travel date.
+        booking.setDate(
+                bookingDate.toString()
+        );
+
+
+        booking.setQuantity(
+                seats
+        );
+
+
+        // -----------------------------------------------------
+        // STORE FINAL CHECKOUT AMOUNT
+        // -----------------------------------------------------
+
         if (price <= 0) {
+
             throw new RuntimeException(
                     "Invalid booking amount"
             );
         }
 
-        booking.setTotalPrice(price);
+
+        booking.setTotalPrice(
+                price
+        );
 
 
         // =====================================================
         // ADD BOOKING TO USER
         // =====================================================
 
-        user.getBookings().add(booking);
+        user.getBookings().add(
+                booking
+        );
 
-        userRepository.save(user);
+        userRepository.save(
+                user
+        );
 
 
         // =====================================================
@@ -347,18 +484,145 @@ public class BookingService {
                     freeze.getExpiresAt()
                             .isAfter(LocalDateTime.now())) {
 
-                freeze.setStatus("USED");
+                freeze.setStatus(
+                        "USED"
+                );
 
-                priceFreezeRepository.save(freeze);
+                priceFreezeRepository.save(
+                        freeze
+                );
 
                 System.out.println(
-                        "🔒 Price freeze marked as USED"
+                        "Price freeze marked as USED"
                 );
             }
         }
 
 
         return booking;
+    }
+
+
+    // =========================================================
+    // SEAT BOOKING HELPERS
+    // =========================================================
+
+    private List<String> parseSelectedSeats(
+            String selectedSeats) {
+
+        if (selectedSeats == null ||
+                selectedSeats.isBlank()) {
+
+            return new ArrayList<>();
+        }
+
+
+        String[] rawSeats =
+                selectedSeats.split(",");
+
+
+        Set<String> uniqueSeats =
+                new HashSet<>();
+
+
+        for (String rawSeat : rawSeats) {
+
+            String seat =
+                    rawSeat == null
+                            ? ""
+                            : rawSeat
+                                    .trim()
+                                    .toUpperCase(
+                                            Locale.ROOT
+                                    );
+
+
+            if (!seat.isBlank()) {
+
+                uniqueSeats.add(
+                        seat
+                );
+            }
+        }
+
+
+        return new ArrayList<>(
+                uniqueSeats
+        );
+    }
+
+
+    private String findSeatCollectionName(
+            String flightId) {
+
+        for (String collectionName :
+                mongoTemplate.getCollectionNames()) {
+
+            try {
+
+                Query query =
+                        new Query(
+                                Criteria.where("flightId")
+                                        .is(flightId)
+                        ).limit(1);
+
+
+                if (mongoTemplate.exists(
+                        query,
+                        collectionName)) {
+
+                    return collectionName;
+                }
+
+            } catch (Exception ignored) {
+
+                // Ignore collections that cannot be
+                // queried as normal documents.
+            }
+        }
+
+
+        return null;
+    }
+
+
+    private void releaseLockedSeats(
+            String flightId,
+            List<String> lockedSeats,
+            String seatCollection) {
+
+        for (String seatNumber :
+                lockedSeats) {
+
+            Query query =
+                    new Query(
+                            Criteria.where("flightId")
+                                    .is(flightId)
+                                    .and("seatNumber")
+                                    .is(seatNumber)
+                                    .and("status")
+                                    .is("BOOKED")
+                    );
+
+
+            Update update =
+                    new Update()
+                            .set(
+                                    "status",
+                                    "AVAILABLE"
+                            );
+
+
+            mongoTemplate.findAndModify(
+                    query,
+                    update,
+                    FindAndModifyOptions
+                            .options()
+                            .returnNew(true),
+                    Document.class,
+                    seatCollection
+            );
+        }
     }
 
 
@@ -379,7 +643,8 @@ public class BookingService {
         // BASIC VALIDATION
         // -----------------------------------------------------
 
-        if (userId == null || userId.isBlank()) {
+        if (userId == null ||
+                userId.isBlank()) {
 
             throw new RuntimeException(
                     "User ID is required"
@@ -387,7 +652,8 @@ public class BookingService {
         }
 
 
-        if (hotelId == null || hotelId.isBlank()) {
+        if (hotelId == null ||
+                hotelId.isBlank()) {
 
             throw new RuntimeException(
                     "Hotel ID is required"
@@ -407,14 +673,8 @@ public class BookingService {
         // DATE VALIDATION
         // =====================================================
 
-        /*
-         * A hotel booking MUST have a date.
-         *
-         * We do not automatically use today's date because
-         * the user may have selected an old date.
-         */
-
-        if (date == null || date.isBlank()) {
+        if (date == null ||
+                date.isBlank()) {
 
             throw new RuntimeException(
                     "Please select an updated check-in date"
@@ -424,10 +684,13 @@ public class BookingService {
 
         LocalDate selectedDate;
 
+
         try {
 
             selectedDate =
-                    LocalDate.parse(date);
+                    LocalDate.parse(
+                            date
+                    );
 
         } catch (Exception e) {
 
@@ -440,12 +703,6 @@ public class BookingService {
         LocalDate today =
                 LocalDate.now();
 
-
-        /*
-         * IMPORTANT:
-         *
-         * Previous dates are NOT allowed.
-         */
 
         if (selectedDate.isBefore(today)) {
 
@@ -469,9 +726,14 @@ public class BookingService {
                                 .toUpperCase();
 
 
-        if (!normalizedRoomType.equals("STANDARD")
-                && !normalizedRoomType.equals("DELUXE")
-                && !normalizedRoomType.equals("PREMIUM")) {
+        if (!normalizedRoomType.equals(
+                "STANDARD")
+                &&
+                !normalizedRoomType.equals(
+                        "DELUXE")
+                &&
+                !normalizedRoomType.equals(
+                        "PREMIUM")) {
 
             throw new RuntimeException(
                     "Invalid room type. "
@@ -485,7 +747,9 @@ public class BookingService {
         // =====================================================
 
         Optional<Users> usersOptional =
-                userRepository.findById(userId);
+                userRepository.findById(
+                        userId
+                );
 
 
         // =====================================================
@@ -493,7 +757,9 @@ public class BookingService {
         // =====================================================
 
         Optional<Hotel> hotelOptional =
-                hotelRepository.findById(hotelId);
+                hotelRepository.findById(
+                        hotelId
+                );
 
 
         if (usersOptional.isEmpty()) {
@@ -515,6 +781,7 @@ public class BookingService {
         Users user =
                 usersOptional.get();
 
+
         Hotel hotel =
                 hotelOptional.get();
 
@@ -522,11 +789,6 @@ public class BookingService {
         // =====================================================
         // INITIALIZE ROOM AVAILABILITY
         // =====================================================
-
-        /*
-         * Existing hotels created before Task 4 may not have
-         * room-type availability.
-         */
 
         hotel.initializeRoomTypeAvailabilityIfNeeded();
 
@@ -573,7 +835,8 @@ public class BookingService {
 
             throw new RuntimeException(
                     "Not enough "
-                            + normalizedRoomType.toLowerCase()
+                            + normalizedRoomType
+                                    .toLowerCase()
                             + " rooms available. Available: "
                             + typeAvailability
             );
@@ -589,7 +852,8 @@ public class BookingService {
             case "DELUXE":
 
                 hotel.setDeluxeRooms(
-                        hotel.getDeluxeRooms() - rooms
+                        hotel.getDeluxeRooms()
+                                - rooms
                 );
 
                 break;
@@ -598,7 +862,8 @@ public class BookingService {
             case "PREMIUM":
 
                 hotel.setPremiumRooms(
-                        hotel.getPremiumRooms() - rooms
+                        hotel.getPremiumRooms()
+                                - rooms
                 );
 
                 break;
@@ -607,7 +872,8 @@ public class BookingService {
             default:
 
                 hotel.setStandardRooms(
-                        hotel.getStandardRooms() - rooms
+                        hotel.getStandardRooms()
+                                - rooms
                 );
 
                 break;
@@ -625,7 +891,9 @@ public class BookingService {
         );
 
 
-        hotelRepository.save(hotel);
+        hotelRepository.save(
+                hotel
+        );
 
 
         // =====================================================
@@ -645,14 +913,6 @@ public class BookingService {
                 hotelId
         );
 
-
-        /*
-         * IMPORTANT:
-         *
-         * Store the date selected by the user.
-         *
-         * DO NOT use LocalDateTime.now().
-         */
 
         booking.setDate(
                 selectedDate.toString()
@@ -677,6 +937,7 @@ public class BookingService {
                 booking
         );
 
+
         userRepository.save(
                 user
         );
@@ -686,33 +947,47 @@ public class BookingService {
                 "========================================"
         );
 
-        System.out.println(
-                "🏨 HOTEL BOOKING CREATED"
-        );
 
         System.out.println(
-                "Hotel ID: " + hotelId
+                "HOTEL BOOKING CREATED"
         );
 
-        System.out.println(
-                "User ID: " + userId
-        );
 
         System.out.println(
-                "Room Type: " + normalizedRoomType
+                "Hotel ID: "
+                        + hotelId
         );
 
-        System.out.println(
-                "Rooms: " + rooms
-        );
 
         System.out.println(
-                "Booking Date: " + selectedDate
+                "User ID: "
+                        + userId
         );
 
+
         System.out.println(
-                "Total Price: ₹" + price
+                "Room Type: "
+                        + normalizedRoomType
         );
+
+
+        System.out.println(
+                "Rooms: "
+                        + rooms
+        );
+
+
+        System.out.println(
+                "Booking Date: "
+                        + selectedDate
+        );
+
+
+        System.out.println(
+                "Total Price: ₹"
+                        + price
+        );
+
 
         System.out.println(
                 "========================================"

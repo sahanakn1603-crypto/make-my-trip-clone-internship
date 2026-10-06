@@ -15,21 +15,23 @@ public class BookingController {
     private BookingService bookingService;
 
     @PostMapping("/flight")
-    public Users.Booking bookFlight(
-            @RequestParam String userId,
-            @RequestParam String flightId,
-            @RequestParam int seats,
-            @RequestParam double price,
-            @RequestParam(required = false, defaultValue = "") String date) {
+public Users.Booking bookFlight(
+        @RequestParam String userId,
+        @RequestParam String flightId,
+        @RequestParam int seats,
+        @RequestParam double price,
+        @RequestParam(required = false, defaultValue = "") String date,
+        @RequestParam(required = false, defaultValue = "") String selectedSeats) {
 
-        return bookingService.bookFlight(
-                userId,
-                flightId,
-                seats,
-                price,
-                date
-        );
-    }
+    return bookingService.bookFlight(
+            userId,
+            flightId,
+            seats,
+            price,
+            date,
+            selectedSeats
+    );
+}
 
     @PostMapping("/hotel")
     public Users.Booking bookhotel(
