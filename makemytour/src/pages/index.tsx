@@ -715,28 +715,30 @@ function Home() {
             )}
 
             {/* TO */}
-            <div className="col-span-1">
-              <SearchSelect
-                options={
-                  bookingtype === "flights"
-                    ? flightToOptions
-                    : cityOptions
-                }
-                placeholder={
-                  bookingtype === "flights"
-                    ? "To"
-                    : "City"
-                }
-                value={to}
-                onChange={setto}
-                icon={<MapPin className="text-gray-400" />}
-                subtitle={
-                  bookingtype === "flights"
-                    ? "Enter city or airport"
-                    : "Enter city"
-                }
-              />
-            </div>
+            {/* TO */}
+<div className="col-span-1">
+  <SearchSelect
+    options={
+      bookingtype === "flights"
+        ? flightToOptions
+        : cityOptions
+    }
+    placeholder={
+      bookingtype === "flights"
+        ? "To"
+        : "City"
+    }
+   value={to}
+excludeValue={bookingtype === "flights" ? from : ""}
+onChange={setto}
+    icon={<MapPin className="text-gray-400" />}
+    subtitle={
+      bookingtype === "flights"
+        ? "Enter city or airport"
+        : "Enter city"
+    }
+  />
+</div>
 
             {/* DATE */}
             <div className="col-span-1">
